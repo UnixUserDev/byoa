@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.1 — 2026-10-19
+
+### Safety
+
+- **`$HOME` is refused as a workspace.** The workspace is the sandbox's single read-write mount,
+  so launching from your home directory handed the model everything you own. `$HOME`, `/home` and
+  `/` are now rejected unless `--allow-home` is passed explicitly. Point the agent at a project
+  directory instead.
+- A workspace that cannot be created or opened is reported in one line instead of a stack trace.
+
+### Fixed
+
+- A piped/empty stdin no longer leaves an unsettled top-level await (exit 13 with a Node warning);
+  the REPL refuses a non-TTY with a usage message.
+- `-p ""` is a usage error instead of silently dropping into the REPL.
+
 ## 0.2.0 — 2026-10-19
 
 ### TUI

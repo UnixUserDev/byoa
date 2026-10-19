@@ -23,6 +23,7 @@ import type { MemoryStore } from "../../memory/types.ts"
 import { createRenderer } from "./render.ts"
 import type { Renderer } from "./render.ts"
 import { runTui, shouldUseTui } from "../tui/run.ts"
+import { broadWorkspaceReason } from "./guard.ts"
 import { VERSION } from "../../version.ts"
 
 const HELP = `byoa ${VERSION} - bring-your-own-agent
@@ -43,6 +44,7 @@ Options:
       --rw <dir>          extra read-write directory (repeatable)
       --no-sandbox        run with no isolation (loudly warned about, never silent)
       --no-strict         degrade instead of refusing when bubblewrap is missing
+      --allow-home        permit $HOME (or /home, or /) as the workspace
       --ask               ask before running mutating tools
       --tui               full-screen terminal UI (falls back when not a TTY)
       --no-color          disable ANSI colour
@@ -70,6 +72,7 @@ const OPTIONS = {
   "no-sandbox": { type: "boolean" },
   "no-strict": { type: "boolean" },
   strict: { type: "boolean" },
+  "allow-home": { type: "boolean" },
   tui: { type: "boolean" },
   ask: { type: "boolean" },
   "no-color": { type: "boolean" },
@@ -136,6 +139,15 @@ export async function main(argv: string[]): Promise<number> {
   const cwd = resolve(asString(values.cwd) ?? process.cwd())
   if (!existsSync(cwd)) {
     stderr(`--cwd does not exist: ${cwd}`)
+    return 2
+  }
+  // The workspace is the sandbox's read-write mount. `$HOME` (or `/`) as the workspace means the
+  // model can read and write everything you own, so it needs an explicit opt-in.
+  const broad = broadWorkspaceReason(cwd)
+  if (broad !== null && !asBool(values["allow-home"])) {
+    stderr(
+      `refusing to use ${cwd} as the workspace: ${broad}. cd into a project, pass --cwd <dir>, or --allow-home to override.`,
+    )
     return 2
   }
   const loaded = loadConfig(asString(values.config) ?? configPath())
