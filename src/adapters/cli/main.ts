@@ -126,6 +126,13 @@ export async function main(argv: string[]): Promise<number> {
     return 0
   }
 
+  const promptArgument = asString(values.prompt)
+  if (promptArgument !== undefined && promptArgument.trim().length === 0) {
+    // `-p "$VAR"` with an empty variable used to fall through into the REPL and then crash on EOF.
+    stderr("-p/--prompt is empty - pass some text, or omit it for the interactive REPL")
+    return 2
+  }
+
   const cwd = resolve(asString(values.cwd) ?? process.cwd())
   if (!existsSync(cwd)) {
     stderr(`--cwd does not exist: ${cwd}`)
@@ -137,7 +144,13 @@ export async function main(argv: string[]): Promise<number> {
 
   const databasePath =
     asString(values.db) ?? (config.store.path.length > 0 ? config.store.path : defaultDatabasePath())
-  const db = openDatabase(databasePath)
+  let db: ReturnType<typeof openDatabase>
+  try {
+    db = openDatabase(databasePath)
+  } catch (error: unknown) {
+    stderr(`could not open database ${databasePath}: ${error instanceof Error ? error.message : String(error)}`)
+    return 1
+  }
   migrate(db)
   const store = new SqliteSessionStore(db)
 
@@ -337,6 +350,15 @@ export async function main(argv: string[]): Promise<number> {
     return finishReason === "stop" ? 0 : 1
   }
 
+  // No prompt and no terminal: a REPL here would read EOF immediately and exit 13 with an
+  // unsettled-await warning from Node. Refuse with a usage message instead.
+  if (process.stdin.isTTY !== true) {
+    stderr('stdin is not a terminal - use -p "..." for one-shot mode')
+    memory?.close()
+    store.close()
+    return 2
+  }
+
   const code = await runRepl(agent, renderer, persistModel)
   memory?.close()
   store.close()
@@ -423,6 +445,13 @@ async function runRepl(
   let resolveTurn: (() => void) | null = null
   let closed = false
 
+  // `rl.question()` never settles when stdin hits EOF; racing it against close is what stops the
+  // process from leaving an unsettled top-level await (which makes Node exit 13).
+  let signalClosed: () => void = () => {}
+  const closedPromise = new Promise<void>((resolve) => {
+    signalClosed = resolve
+  })
+
   /**
    * Settle the turn that is waiting. Written as one function because TS narrowed the inline
    * `const pending = resolveTurn; resolveTurn = null; pending?.()` form to `never` inside a
@@ -436,6 +465,7 @@ async function runRepl(
 
   rl.on("close", () => {
     closed = true
+    signalClosed()
     finishTurn()
   })
 
@@ -459,7 +489,10 @@ async function runRepl(
   while (!closed) {
     let line: string
     try {
-      line = await rl.question("byoa> ")
+      // Race: whichever happens first, the loop always makes progress and main() always resolves.
+      const answer = await Promise.race([rl.question("byoa> "), closedPromise.then(() => null)])
+      if (answer === null) break
+      line = answer
     } catch {
       break
     }
