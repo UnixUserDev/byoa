@@ -1,6 +1,6 @@
 {
   "name": "byoa",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "BYOA - a bring-your-own-agent, local-first coding agent harness",
@@ -13,9 +13,9 @@
   },
   "scripts": {
     "start": "node bin/byoa.ts",
-    "test": "tsc --noEmit && node --test \"test/**/*.test.ts\"",
-    "test:only": "node --test \"test/**/*.test.ts\"",
-    "smoke": "node --test \"test/smoke/**/*.test.ts\"",
+    "test": "tsc --noEmit && node --experimental-ffi --test \"test/**/*.test.ts\"",
+    "test:only": "node --experimental-ffi --test \"test/**/*.test.ts\"",
+    "smoke": "node --experimental-ffi --test \"test/smoke/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "build": "esbuild bin/byoa.ts --bundle --platform=node --format=esm --target=node26 --external:@opentui/core --outfile=dist/byoa.js",
     "pack:release": "node scripts/pack-release.mjs"

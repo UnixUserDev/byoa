@@ -22,6 +22,7 @@ import { createMemoryStore } from "../../memory/index.ts"
 import type { MemoryStore } from "../../memory/types.ts"
 import { createRenderer } from "./render.ts"
 import type { Renderer } from "./render.ts"
+import { runTui, shouldUseTui } from "../tui/run.ts"
 import { VERSION } from "../../version.ts"
 
 const HELP = `byoa ${VERSION} - bring-your-own-agent
@@ -43,6 +44,7 @@ Options:
       --no-sandbox        run with no isolation (loudly warned about, never silent)
       --no-strict         degrade instead of refusing when bubblewrap is missing
       --ask               ask before running mutating tools
+      --tui               full-screen terminal UI (falls back when not a TTY)
       --no-color          disable ANSI colour
       --db <path>         database path (default: ${defaultDatabasePath()})
       --config <path>     config file (default: ${configPath()})
@@ -68,6 +70,7 @@ const OPTIONS = {
   "no-sandbox": { type: "boolean" },
   "no-strict": { type: "boolean" },
   strict: { type: "boolean" },
+  tui: { type: "boolean" },
   ask: { type: "boolean" },
   "no-color": { type: "boolean" },
   help: { type: "boolean", short: "h" },
@@ -275,6 +278,42 @@ export async function main(argv: string[]): Promise<number> {
   const renderer = createRenderer({ color })
 
   const promptText = asString(values.prompt) ?? positionals.join(" ").trim()
+
+  const persistModel = (info: { provider: string; model: string; tier: string }): void => {
+    try {
+      store.setModel(session.id, info.provider, info.model, info.tier as TierId)
+    } catch {
+      // A session row that vanished under us is not worth crashing the frontend over.
+    }
+  }
+
+  // TUI: opt-in, and only on a real colour terminal. Any refusal falls back to the plain CLI with
+  // one line of explanation rather than a crash.
+  if (asBool(values.tui)) {
+    const decision = shouldUseTui({
+      requested: true,
+      stdinTTY: process.stdin.isTTY === true,
+      stdoutTTY: process.stdout.isTTY === true,
+      ...(process.env.TERM === undefined ? {} : { term: process.env.TERM }),
+      noColor: asBool(values["no-color"]) || process.env.NO_COLOR !== undefined,
+    })
+    if (!decision.ok) {
+      stderr(`tui: ${decision.reason} - falling back to the plain CLI`)
+    } else {
+      try {
+        const code = await runTui(agent, {
+          ...(promptText.length > 0 ? { prompt: promptText } : {}),
+          onSessionChange: persistModel,
+        })
+        memory?.close()
+        store.close()
+        return code
+      } catch (error: unknown) {
+        stderr(`tui: ${error instanceof Error ? error.message : String(error)} - falling back to the plain CLI`)
+      }
+    }
+  }
+
   if (promptText.length > 0) {
     let finishReason: string = "stop"
     const finished = (async (): Promise<void> => {
@@ -296,13 +335,7 @@ export async function main(argv: string[]): Promise<number> {
     return finishReason === "stop" ? 0 : 1
   }
 
-  const code = await runRepl(agent, renderer, (info) => {
-    try {
-      store.setModel(session.id, info.provider, info.model, info.tier)
-    } catch {
-      // A session row that vanished under us is not worth crashing the REPL over.
-    }
-  })
+  const code = await runRepl(agent, renderer, persistModel)
   memory?.close()
   store.close()
   return code

@@ -10,10 +10,10 @@ No cloud service. No build step. No runtime dependencies.
 
 ## Status
 
-**v0.1.0 — usable, and honest about it.** The core, the provider layer, session persistence, the
-tool set, the sandbox and Obsidian-backed memory are implemented and tested. The CLI is the only
-frontend that ships today. TUI, Web and Electron adapters are planned but **not** in this release;
-neither are MCP, subagents, or web fetch/search.
+**v0.2.0 — usable, and honest about it.** The core, the provider layer, session persistence, the
+tool set, the sandbox, Obsidian-backed memory and the terminal UI are implemented and tested. The
+CLI and the TUI are the frontends that ship today. Web and Electron adapters are planned but
+**not** in this release; neither are MCP, subagents, or web fetch/search.
 
 ## Requirements
 
@@ -31,7 +31,7 @@ so a tarball of the TypeScript source is not a runnable install.
 **Standalone** (no npm install; needs Node >= 26):
 
 ```bash
-tar -xzf byoa-0.1.0-linux-x64.tar.gz
+tar -xzf byoa-0.2.0-linux-x64.tar.gz
 install -m755 byoa ~/.local/bin/byoa
 byoa --version
 ```
@@ -39,7 +39,7 @@ byoa --version
 **npm-installable tarball:**
 
 ```bash
-npm install -g ./byoa-0.1.0-npm.tgz
+npm install -g ./byoa-0.2.0-npm.tgz
 byoa --version
 ```
 
@@ -61,10 +61,18 @@ byoa --provider lmstudio --model google/gemma-4-e4b
 byoa --provider ollama --model qwen3-coder
 
 # interactive
-node bin/byoa.ts
+byoa
+byoa --tui
 ```
 
 Inside the REPL: `/help`, `/tier`, `/model [provider/]model`, `/cancel`, `/exit`.
+
+The TUI (`--tui`) is a calm, single-column layout: header, transcript, input, and one stats line
+(tokens in/out, tok/s, elapsed, tool calls, memory hits, model/tier/sandbox). It is opt-in and
+falls back to the plain CLI when stdout is not a TTY, `TERM=dumb`, or `NO_COLOR` is set.
+
+TUI keys: `Enter` send · `Ctrl+C` cancel (or clear) · `Esc` cancel · `Ctrl+T` reasoning ·
+`Ctrl+O` tools · `PgUp`/`PgDn` scroll · `/help` · `/exit`. Approvals: `a` allow, `d`/`Esc` deny.
 
 Sessions are persisted and resumable:
 

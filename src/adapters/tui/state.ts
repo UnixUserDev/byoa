@@ -113,7 +113,15 @@ export type Effect =
 
 const MAX_BLOCKS = 400
 
-function add(state: TuiState, block: Omit<Block, "id"> & { id?: number }): { block: Block; state: TuiState } {
+type BlockWithoutId =
+  | Omit<UserBlock, "id">
+  | Omit<AssistantBlock, "id">
+  | Omit<ReasoningBlock, "id">
+  | Omit<ToolBlock, "id">
+  | Omit<MemoryBlock, "id">
+  | Omit<NoticeBlock, "id">
+
+function add(state: TuiState, block: BlockWithoutId): { block: Block; state: TuiState } {
   const id = state.nextId
   const full = { ...block, id } as Block
   const blocks = [...state.blocks, full]
@@ -127,9 +135,12 @@ function add(state: TuiState, block: Omit<Block, "id"> & { id?: number }): { blo
   }
 }
 
-function lastOpen(state: TuiState, kind: "assistant" | "reasoning"): Block | undefined {
+function lastOpen(state: TuiState, kind: "assistant" | "reasoning"): AssistantBlock | ReasoningBlock | undefined {
   const last = state.blocks.at(-1)
-  return last && last.kind === kind ? last : undefined
+  if (!last) return undefined
+  if (kind === "assistant" && last.kind === "assistant") return last
+  if (kind === "reasoning" && last.kind === "reasoning") return last
+  return undefined
 }
 
 export interface ReduceResult {
@@ -194,7 +205,12 @@ export function reduce(state: TuiState, event: AgentEvent, now: number): ReduceR
     case "text": {
       const open = lastOpen(state, "assistant")
       if (open) {
-        const next = { ...state, blocks: state.blocks.map((b) => (b.id === open.id ? { ...b, text: b.text + event.delta } : b)) }
+        const next = {
+          ...state,
+          blocks: state.blocks.map((b) =>
+            b.id === open.id && b.kind === "assistant" ? { ...b, text: b.text + event.delta } : b,
+          ),
+        }
         effects.push({ t: "block.append", id: open.id, text: event.delta })
         return { state: next, effects }
       }
@@ -207,7 +223,12 @@ export function reduce(state: TuiState, event: AgentEvent, now: number): ReduceR
     case "reasoning": {
       const open = lastOpen(state, "reasoning")
       if (open) {
-        const next = { ...state, blocks: state.blocks.map((b) => (b.id === open.id ? { ...b, text: b.text + event.delta } : b)) }
+        const next = {
+          ...state,
+          blocks: state.blocks.map((b) =>
+            b.id === open.id && b.kind === "reasoning" ? { ...b, text: b.text + event.delta } : b,
+          ),
+        }
         effects.push({ t: "block.append", id: open.id, text: event.delta })
         return { state: next, effects }
       }

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.0 — 2026-10-19
+
+### TUI
+
+- New `--tui` frontend on `@opentui/core`, opt-in and TTY-only, with a clean fallback to the plain
+  CLI when stdout is not a terminal, `TERM=dumb`, or `NO_COLOR` is set.
+- Calm single-column layout: header, transcript, input, one stats line (tokens in/out, tok/s,
+  elapsed, tool calls, memory hits, model/tier/sandbox) and a keybar.
+- Incremental streaming (appends, not full repaints), in-place tool-call updates, approval bar
+  (`a` allow / `d` deny / `Esc` deny), `Ctrl+T` reasoning, `Ctrl+O` tools, scroll keys.
+- Terminal is restored on every exit path, including signals; `renderer.destroy()` is awaited
+  before the agent is disposed.
+- The TUI and the CLI share the same `AgentEvent`/`AgentCommand` boundary; `run.ts` is the only
+  module that loads OpenTUI at runtime.
+
+### Release
+
+- Releases now ship built artifacts (standalone tarball and npm-installable tarball). Node does
+  not type-strip TypeScript inside `node_modules`, so the source tree is not an installable
+  package; `npm run pack:release` produces both bundles with esbuild.
+
 ## 0.1.0 — 2026-10-19
 
 First usable release. CLI only; TUI, Web and Electron adapters are not included.
