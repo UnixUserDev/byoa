@@ -24,7 +24,7 @@ import { createRenderer } from "./render.ts"
 import type { Renderer } from "./render.ts"
 import { VERSION } from "../../version.ts"
 
-const HELP = `byoa ${VERSION} - bring-your-own-everything agent
+const HELP = `byoa ${VERSION} - bring-your-own-agent
 
 Usage:
   byoa [options] [prompt]

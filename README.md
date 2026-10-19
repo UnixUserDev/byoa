@@ -1,6 +1,6 @@
 # byoa
 
-**B**ring **Y**our **O**wn **A**nything — a local-first coding agent harness.
+**B**ring **Y**our **O**wn **A**gent — a local-first coding agent harness.
 
 Point it at any model (OpenAI-compatible, Anthropic, Ollama, llama.cpp, LM Studio, a custom base
 URL), pick a prompt tier sized to that model, and let it run shell + file tools inside a

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "BYOA - a bring-your-own-everything, local-first coding agent harness",
+  "description": "BYOA - a bring-your-own-agent, local-first coding agent harness",
   "license": "MIT",
   "engines": {
     "node": ">=26"

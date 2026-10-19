@@ -65,7 +65,7 @@ export class SqliteMemoryStore implements MemoryStore {
     const over = wantTag ? input.limit * 5 : input.limit
     const rows = this.#db
       .prepare(
-        "SELECT path, title, tags, created, snippet(mem, 3, '<<', '>>', ' … ', 12) AS snip, bm25(mem) AS score FROM mem WHERE mem MATCH ? ORDER BY score LIMIT ?",
+        "SELECT path, title, tags, created, snippet(mem, 3, '<<', '>>', ' … ', 32) AS snip, bm25(mem) AS score FROM mem WHERE mem MATCH ? ORDER BY score LIMIT ?",
       )
       .all(fq, over) as Array<{ path: string; title: string; tags: string; created: string; snip: string; score: number }>
 
