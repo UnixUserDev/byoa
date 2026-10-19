@@ -25,32 +25,40 @@ neither are MCP, subagents, or web fetch/search.
 
 ## Install
 
-```bash
-git clone <repo> && cd byoa
-npm install          # devDependencies only: typescript + @types/node
-node bin/byoa.ts --version
-```
+Use a release artifact — not the source tree. Node does not type-strip files inside `node_modules`,
+so a tarball of the TypeScript source is not a runnable install.
 
-Optionally put it on your PATH:
+**Standalone** (no npm install; needs Node >= 26):
 
 ```bash
-printf '#!/usr/bin/env bash\nexec node %s/bin/byoa.ts "$@"\n' "$PWD" > ~/.local/bin/byoa
-chmod +x ~/.local/bin/byoa
+tar -xzf byoa-0.1.0-linux-x64.tar.gz
+install -m755 byoa ~/.local/bin/byoa
+byoa --version
 ```
+
+**npm-installable tarball:**
+
+```bash
+npm install -g ./byoa-0.1.0-npm.tgz
+byoa --version
+```
+
+Both are attached to the [releases page](../../releases). `npm run pack:release` rebuilds them
+from a checkout.
 
 ## Usage
 
 ```bash
 # no API key needed: the fake provider echoes and exercises the whole pipeline
-node bin/byoa.ts --provider fake -p "hello"
+byoa --provider fake -p "hello"
 
 # a real model
-node bin/byoa.ts --provider deepseek --model deepseek-chat -p "explain this repo"
-node bin/byoa.ts --provider openai --model gpt-4o-mini
+byoa --provider deepseek --model deepseek-chat -p "explain this repo"
+byoa --provider openai --model gpt-4o-mini
 
 # local models (LM Studio / Ollama / llama.cpp all speak the OpenAI protocol)
-node bin/byoa.ts --provider lmstudio --model google/gemma-4-e4b
-node bin/byoa.ts --provider ollama --model qwen3-coder
+byoa --provider lmstudio --model google/gemma-4-e4b
+byoa --provider ollama --model qwen3-coder
 
 # interactive
 node bin/byoa.ts
@@ -61,8 +69,8 @@ Inside the REPL: `/help`, `/tier`, `/model [provider/]model`, `/cancel`, `/exit`
 Sessions are persisted and resumable:
 
 ```bash
-node bin/byoa.ts sessions
-node bin/byoa.ts --resume <id-or-title-substring>
+byoa sessions
+byoa --resume <id-or-title-substring>
 ```
 
 ### Providers
