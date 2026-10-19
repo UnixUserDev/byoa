@@ -6,7 +6,8 @@ Point it at any model (OpenAI-compatible, Anthropic, Ollama, llama.cpp, LM Studi
 URL), pick a prompt tier sized to that model, and let it run shell + file tools inside a
 [bubblewrap](https://github.com/containers/bubblewrap) sandbox whose policy you control.
 
-No cloud service. No build step. No runtime dependencies.
+No cloud service. No build step. No required runtime dependencies — the CLI uses Node built-ins
+only; the optional TUI uses `@opentui/core`, which ships beside the release binary.
 
 ## Status
 
@@ -31,10 +32,15 @@ so a tarball of the TypeScript source is not a runnable install.
 **Standalone** (no npm install; needs Node >= 26):
 
 ```bash
-tar -xzf byoa-0.2.0-linux-x64.tar.gz
-install -m755 byoa ~/.local/bin/byoa
+mkdir -p ~/.local/lib/byoa ~/.local/bin
+tar -xzf byoa-0.2.0-linux-x64.tar.gz -C ~/.local/lib/byoa
+ln -sf ~/.local/lib/byoa/byoa ~/.local/bin/byoa
 byoa --version
 ```
+
+Keep the extracted directory together: the launcher resolves `@opentui/core` from the
+`node_modules` beside it. Copying the `byoa` file out on its own still runs the plain CLI, but
+`--tui` will fall back.
 
 **npm-installable tarball:**
 

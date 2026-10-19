@@ -38,7 +38,11 @@ jobs:
       - name: Build release artifacts
         run: npm run pack:release
 
-      - name: Check the artifact's version
+      - name: Check the artifact layout
         run: |
           VERSION=$(node -p "require('./package.json').version")
           test "$(./dist/release/byoa --version)" = "$VERSION"
+          # The standalone artifact must keep the launcher and its node_modules together, or --tui
+          # silently falls back to the CLI.
+          test -d dist/release/node_modules/@opentui/core
+          test -d dist/release/node_modules/@opentui/core-linux-x64

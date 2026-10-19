@@ -309,7 +309,9 @@ export async function main(argv: string[]): Promise<number> {
         store.close()
         return code
       } catch (error: unknown) {
-        stderr(`tui: ${error instanceof Error ? error.message : String(error)} - falling back to the plain CLI`)
+        stderr(
+          `tui: ${error instanceof Error ? error.message : String(error)} - falling back to the plain CLI (keep node_modules next to the byoa binary)`,
+        )
       }
     }
   }
