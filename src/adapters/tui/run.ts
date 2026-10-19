@@ -66,6 +66,22 @@ export async function runTui(agent: AgentHandle, options: RunTuiOptions = {}): P
   const onSignal = (): void => quit()
   for (const signal of signals) process.on(signal, onSignal)
 
+  // A throw from a timer or a key handler would otherwise leave the terminal in raw mode. Restore
+  // first, then exit non-zero.
+  const fatal = (error: unknown): void => {
+    try {
+      app.dispose()
+      renderer.destroy()
+    } catch {
+      // Best effort: the original error is the useful one.
+    }
+    process.stderr.write(`byoa: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`)
+    void renderer.closed.finally(() => process.exit(1))
+    setTimeout(() => process.exit(1), 500)
+  }
+  process.on("uncaughtException", fatal)
+  process.on("unhandledRejection", fatal)
+
   if (options.prompt !== undefined) {
     agent.send({ t: "submit", text: options.prompt })
   }
@@ -83,6 +99,8 @@ export async function runTui(agent: AgentHandle, options: RunTuiOptions = {}): P
     renderer.destroy()
     await renderer.closed
     for (const signal of signals) process.off(signal, onSignal)
+    process.off("uncaughtException", fatal)
+    process.off("unhandledRejection", fatal)
     await agent.dispose()
   }
 

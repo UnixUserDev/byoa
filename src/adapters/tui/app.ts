@@ -36,6 +36,32 @@ export function createApp(options: AppOptions): App {
   let state = initialState()
   const view: View = createView(options.kit, options.renderer, options.width, options.height)
 
+  /**
+   * Coalesce streamed text. `TextRenderable.content` re-renders the node, so calling it per token
+   * is wasteful; batching at ~30 fps keeps the stream smooth and the string work bounded.
+   */
+  const dirty = new Set<number>()
+  let flushTimer: ReturnType<typeof setTimeout> | null = null
+  let toolsExpanded = false
+  const flushText = (): void => {
+    if (flushTimer !== null) {
+      clearTimeout(flushTimer)
+      flushTimer = null
+    }
+    for (const id of dirty) {
+      const block = state.blocks.find((candidate) => candidate.id === id)
+      if (block && (block.kind === "assistant" || block.kind === "reasoning")) view.setBlockText(id, block.text)
+    }
+    dirty.clear()
+  }
+  const scheduleText = (id: number): void => {
+    dirty.add(id)
+    if (flushTimer === null) {
+      flushTimer = setTimeout(flushText, 33)
+      if (typeof flushTimer.unref === "function") flushTimer.unref()
+    }
+  }
+
   /** Add the user's message to the transcript and hand it to the agent. */
   const sendPrompt = (text: string): void => {
     const block = { kind: "user" as const, id: state.nextId, text }
@@ -66,15 +92,17 @@ export function createApp(options: AppOptions): App {
           view.addBlock(effect.block)
           break
         case "block.append":
-          view.appendText(effect.id, effect.text)
+          scheduleText(effect.id)
           break
         case "block.replace":
+          flushText()
           view.replaceBlock(effect.block)
           break
         case "block.trim":
           view.trim(effect.keep)
           break
         case "approval":
+          flushText()
           view.renderApproval(state)
           view.renderMode(state)
           break
@@ -98,6 +126,8 @@ export function createApp(options: AppOptions): App {
   }
 
   const handleEvent = (event: AgentEvent): void => {
+    // Streamed text is coalesced; a tool boundary or the end of a turn must not render ahead of it.
+    if (event.t === "turn.end" || event.t === "error") flushText()
     const before = state
     const result = reduce(before, event, Date.now())
     state = result.state
@@ -205,8 +235,11 @@ export function createApp(options: AppOptions): App {
         view.setReasoningVisible(state.ui.reasoningVisible)
         return
       case "toggleTools":
+        toolsExpanded = !toolsExpanded
+        view.setToolsExpanded(toolsExpanded)
         return
       case "scroll":
+        view.scrollBy(action.by)
         return
       case "scrollBottom":
         view.scrollBottom()
@@ -255,6 +288,8 @@ export function createApp(options: AppOptions): App {
     state: () => state,
     handleEvent,
     dispose: () => {
+      flushText()
+      if (flushTimer !== null) clearTimeout(flushTimer)
       clearInterval(ticker)
       if (options.renderer.keyInput?.off) options.renderer.keyInput.off("keypress", onKey)
       if (options.renderer.off) options.renderer.off("resize", onResize)

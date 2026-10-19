@@ -32,3 +32,13 @@ jobs:
 
       - name: Smoke test
         run: npm run smoke
+
+      # Building the artifact here catches version drift and packaging breakage before a release,
+      # and the version check is the one that used to slip through.
+      - name: Build release artifacts
+        run: npm run pack:release
+
+      - name: Check the artifact's version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          test "$(./dist/release/byoa --version)" = "$VERSION"

@@ -20,7 +20,7 @@ export interface View {
   root: any
   input: any
   addBlock(block: Block): void
-  appendText(id: number, text: string): void
+  setBlockText(id: number, text: string): void
   replaceBlock(block: Block): void
   trim(keep: number): void
   renderHeader(state: TuiState): void
@@ -28,6 +28,8 @@ export interface View {
   renderApproval(state: TuiState): void
   renderMode(state: TuiState): void
   setReasoningVisible(visible: boolean): void
+  setToolsExpanded(expanded: boolean): void
+  scrollBy(delta: number): void
   scrollBottom(): void
   focusInput(): void
   setSize(width: number, height: number): void
@@ -127,10 +129,13 @@ export function createView(kit: Kit, ctx: any, width: number, height: number): V
 
   /** block id -> its renderable. */
   const rendered = new Map<number, any>()
+  /** block id -> the block itself, so a toggle can rebuild its text without the state. */
+  const blocksById = new Map<number, Block>()
   /** ids of reasoning blocks, so Ctrl+T can toggle them without walking the state. */
   const reasoningIds = new Set<number>()
-  /** block id -> accumulated text, so appends never rebuild the string. */
+  /** block id -> accumulated text. */
   const buffers = new Map<number, string>()
+  let toolsExpanded = false
 
   const textOf = (block: Block): string => {
     switch (block.kind) {
@@ -148,7 +153,9 @@ export function createView(kit: Kit, ctx: any, width: number, height: number): V
         const mark = block.ok === null ? glyph.pending : block.ok ? glyph.ok : glyph.fail
         const duration = block.durationMs === undefined ? "" : ` · ${Math.round(block.durationMs)}ms`
         const summary = block.summary.length > 0 ? ` ${block.summary}` : ""
-        return `${glyph.tool} ${block.name}${summary} ${mark}${duration}`
+        const line = `${glyph.tool} ${block.name}${summary} ${mark}${duration}`
+        if (!toolsExpanded || block.content === undefined || block.content.trim().length === 0) return line
+        return `${line}\n${truncate(block.content.trimEnd(), Math.max(40, currentWidth - 4))}`
       }
       default:
         return ""
@@ -164,6 +171,7 @@ export function createView(kit: Kit, ctx: any, width: number, height: number): V
 
   const addBlock = (block: Block): void => {
     if (rendered.has(block.id)) return
+    blocksById.set(block.id, block)
     const text = textOf(block)
     buffers.set(block.id, text)
     const node = new kit.TextRenderable(ctx, {
@@ -177,15 +185,22 @@ export function createView(kit: Kit, ctx: any, width: number, height: number): V
     content.add(node)
   }
 
-  const appendText = (id: number, delta: string): void => {
+  /**
+   * Replace the whole text of a block.
+   *
+   * `TextRenderable.add(string)` looks like an append but the string is not treated as text
+   * content by this version, so streamed deltas after the first silently vanished. Setting
+   * `content` is the reliable path; the app coalesces deltas so this is not called per token.
+   */
+  const setBlockText = (id: number, text: string): void => {
     const node = rendered.get(id)
     if (!node) return
-    buffers.set(id, (buffers.get(id) ?? "") + delta)
-    // Incremental: append a text node instead of re-setting the whole content string.
-    node.add(delta)
+    buffers.set(id, text)
+    node.content = text
   }
 
   const replaceBlock = (block: Block): void => {
+    blocksById.set(block.id, block)
     const node = rendered.get(block.id)
     if (!node) {
       addBlock(block)
@@ -193,7 +208,7 @@ export function createView(kit: Kit, ctx: any, width: number, height: number): V
     }
     const text = textOf(block)
     buffers.set(block.id, text)
-    node.content = truncate(text, currentWidth * 8)
+    node.content = text
     node.fg = colorOf(block)
   }
 
@@ -205,6 +220,7 @@ export function createView(kit: Kit, ctx: any, width: number, height: number): V
       const node = rendered.get(id)
       if (node) content.remove(node)
       rendered.delete(id)
+      blocksById.delete(id)
       reasoningIds.delete(id)
       buffers.delete(id)
     }
@@ -274,7 +290,7 @@ export function createView(kit: Kit, ctx: any, width: number, height: number): V
     root,
     input,
     addBlock,
-    appendText,
+    setBlockText,
     replaceBlock,
     trim,
     renderHeader,
@@ -286,6 +302,17 @@ export function createView(kit: Kit, ctx: any, width: number, height: number): V
         const node = rendered.get(id)
         if (node) node.visible = visible
       }
+    },
+    setToolsExpanded: (expanded: boolean) => {
+      toolsExpanded = expanded
+      for (const [id, block] of blocksById) {
+        if (block.kind !== "tool") continue
+        const node = rendered.get(id)
+        if (node) node.content = textOf(block)
+      }
+    },
+    scrollBy: (delta: number) => {
+      if (typeof transcript.scrollBy === "function") transcript.scrollBy({ x: 0, y: delta })
     },
     scrollBottom: () => {
       if (typeof transcript.scrollTo === "function") transcript.scrollTo({ x: 0, y: Number.MAX_SAFE_INTEGER })

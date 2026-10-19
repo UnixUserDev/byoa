@@ -44,12 +44,15 @@ maybe("the TUI renders the transcript, tool line and stats", async (t: any) => {
     })
     app.handleEvent({ t: "sandbox.info", applied: true, degraded: false, policy: {} as never })
     app.handleEvent({ t: "turn.start", turn: 1 })
-    app.handleEvent({ t: "text", delta: "hello from the tui" })
+    app.handleEvent({ t: "text", delta: "hello from " })
+    app.handleEvent({ t: "text", delta: "the tui" })
     app.handleEvent({ t: "tool.call", id: "c1", name: "fs_read", args: { path: "package.json" }, mutating: false })
     app.handleEvent({ t: "tool.result", id: "c1", name: "fs_read", ok: true, content: "{}" })
     app.handleEvent({ t: "usage", turnInput: 1200, turnOutput: 300, sessionInput: 1200, sessionOutput: 300 })
     app.handleEvent({ t: "turn.end", turn: 1, finishReason: "stop" })
 
+    // Two deltas: the streaming path must render the *second* chunk too. A single-delta test did
+    // not catch the append bug (the first chunk arrived through the constructor).
     const frame = await setup.waitForFrame((text: string) => text.includes("hello from the tui"))
     assert.match(frame, /hello from the tui/)
     assert.match(frame, /fs_read/)

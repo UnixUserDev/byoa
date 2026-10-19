@@ -127,11 +127,7 @@ function add(state: TuiState, block: BlockWithoutId): { block: Block; state: Tui
   const blocks = [...state.blocks, full]
   return {
     block: full,
-    state: {
-      ...state,
-      blocks: blocks.length > MAX_BLOCKS ? blocks.slice(blocks.length - MAX_BLOCKS) : blocks,
-      nextId: id + 1,
-    },
+    state: { ...state, blocks, nextId: id + 1 },
   }
 }
 
@@ -149,6 +145,19 @@ export interface ReduceResult {
 }
 
 export function reduce(state: TuiState, event: AgentEvent, now: number): ReduceResult {
+  const result = reduceInner(state, event, now)
+  // The transcript bound is enforced here, with an effect, so the renderer can destroy the oldest
+  // nodes instead of only forgetting them in state (which used to leak renderables forever).
+  if (result.state.blocks.length > MAX_BLOCKS) {
+    return {
+      state: { ...result.state, blocks: result.state.blocks.slice(result.state.blocks.length - MAX_BLOCKS) },
+      effects: [...result.effects, { t: "block.trim", keep: MAX_BLOCKS }],
+    }
+  }
+  return result
+}
+
+function reduceInner(state: TuiState, event: AgentEvent, now: number): ReduceResult {
   const effects: Effect[] = []
   switch (event.t) {
     case "session.info": {
