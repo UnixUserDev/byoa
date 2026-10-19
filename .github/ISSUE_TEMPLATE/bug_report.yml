@@ -1,0 +1,53 @@
+name: Bug report
+description: Something is broken, or the sandbox did something it should not have.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For sandbox escapes, secret leaks or policy bypasses, do **not** file a public issue —
+        follow SECURITY.md instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include the exact command or tool call and the relevant output.
+      placeholder: |
+        Command: node bin/byoa.ts --provider ...
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: Smallest steps that show the problem.
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      description: Output of `node --version`.
+    validations:
+      required: true
+  - type: input
+    id: bwrap
+    attributes:
+      label: bubblewrap
+      description: Output of `bwrap --version`, or "none".
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / distro
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config
+      description: The sandbox policy or config block involved, with any keys removed.

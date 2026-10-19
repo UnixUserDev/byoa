@@ -1,0 +1,28 @@
+{
+  "name": "byoa",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "BYOA - a bring-your-own-everything, local-first coding agent harness",
+  "license": "MIT",
+  "engines": {
+    "node": ">=26"
+  },
+  "bin": {
+    "byoa": "./bin/byoa.ts"
+  },
+  "scripts": {
+    "start": "node bin/byoa.ts",
+    "test": "tsc --noEmit && node --test \"test/**/*.test.ts\"",
+    "test:only": "node --test \"test/**/*.test.ts\"",
+    "smoke": "node --test \"test/smoke/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "optionalDependencies": {
+    "@opentui/core": "0.6.6"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^5.9.3"
+  }
+}

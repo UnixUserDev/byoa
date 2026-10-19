@@ -1,0 +1,23 @@
+node_modules/
+*.log
+*.db
+*.db-wal
+*.db-shm
+.byoa/
+coverage/
+dist/
+.DS_Store
+
+# Credentials and local state. The session DB is a real secret store (it holds whatever the model
+# read), and config.json is where a literal API key lands if someone takes the lazy path.
+.env
+.env.*
+config.json
+secrets.json
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+credentials
