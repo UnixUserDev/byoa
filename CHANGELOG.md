@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.2 — 2026-10-21
+
+### Hardening
+
+- The workspace guard resolves symlinks, so a link pointing at `$HOME` is refused like `$HOME`.
+- `--cwd` must be a directory; a regular file is refused before a session is created.
+- The guard message says "its parent directory" rather than `/home`, which is only correct when
+  `$HOME` sits directly under `/home`.
+
+### CI
+
+- The agent-loop tests run with `strict` off, so they pass on runners without a usable bubblewrap
+  instead of counting the sandbox's fatal startup error as a turn error.
+- GitHub Actions bumped to `checkout@v7` / `setup-node@v7`.
+- CI builds the release artifacts and checks their version and layout on every push.
+
 ## 0.2.1 — 2026-10-19
 
 ### Safety

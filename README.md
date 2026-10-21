@@ -11,7 +11,7 @@ only; the optional TUI uses `@opentui/core`, which ships beside the release bina
 
 ## Status
 
-**v0.2.1 — usable, and honest about it.** The core, the provider layer, session persistence, the
+**v0.2.2 — usable, and honest about it.** The core, the provider layer, session persistence, the
 tool set, the sandbox, Obsidian-backed memory and the terminal UI are implemented and tested. The
 CLI and the TUI are the frontends that ship today. Web and Electron adapters are planned but
 **not** in this release; neither are MCP, subagents, or web fetch/search.
@@ -33,7 +33,7 @@ so a tarball of the TypeScript source is not a runnable install.
 
 ```bash
 mkdir -p ~/.local/lib/byoa ~/.local/bin
-tar -xzf byoa-0.2.1-linux-x64.tar.gz -C ~/.local/lib/byoa
+tar -xzf byoa-0.2.2-linux-x64.tar.gz -C ~/.local/lib/byoa
 ln -sf ~/.local/lib/byoa/byoa ~/.local/bin/byoa
 byoa --version
 ```
@@ -45,7 +45,7 @@ Keep the extracted directory together: the launcher resolves `@opentui/core` fro
 **npm-installable tarball:**
 
 ```bash
-npm install -g ./byoa-0.2.1-npm.tgz
+npm install -g ./byoa-0.2.2-npm.tgz
 byoa --version
 ```
 
