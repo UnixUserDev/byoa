@@ -1,8 +1,10 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { homedir } from "node:os"
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { broadWorkspaceReason } from "../../src/adapters/cli/guard.ts"
+import { homedir } from "node:os"
+import { broadWorkspaceReason, workspaceProblem } from "../../src/adapters/cli/guard.ts"
 
 test("the home directory is refused as a workspace", () => {
   assert.match(broadWorkspaceReason(homedir()) ?? "", /home directory/)
@@ -22,4 +24,28 @@ test("a project directory is allowed", () => {
 test("a path with the home prefix but not the home dir is allowed", () => {
   // `$HOME2` must not be mistaken for `$HOME`.
   assert.equal(broadWorkspaceReason(`${homedir()}2`), null)
+})
+
+test("a symlink to the home directory is refused", () => {
+  const dir = mkdtempSync(join(tmpdir(), "byoa-guard-"))
+  try {
+    const link = join(dir, "home-link")
+    symlinkSync(homedir(), link)
+    assert.match(broadWorkspaceReason(link) ?? "", /home directory/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("workspaceProblem rejects missing paths and regular files", () => {
+  assert.match(workspaceProblem("/definitely/not/here") ?? "", /does not exist/)
+  const dir = mkdtempSync(join(tmpdir(), "byoa-guard-"))
+  try {
+    const file = join(dir, "a-file")
+    writeFileSync(file, "x")
+    assert.match(workspaceProblem(file) ?? "", /not a directory/)
+    assert.equal(workspaceProblem(dir), null)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

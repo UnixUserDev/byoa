@@ -5,9 +5,9 @@
 ### Safety
 
 - **`$HOME` is refused as a workspace.** The workspace is the sandbox's single read-write mount,
-  so launching from your home directory handed the model everything you own. `$HOME`, `/home` and
-  `/` are now rejected unless `--allow-home` is passed explicitly. Point the agent at a project
-  directory instead.
+  so launching from your home directory handed the model everything you own. `$HOME`, its parent
+  directory, and `/` are now rejected unless `--allow-home` is passed explicitly. Point the agent
+  at a project directory instead.
 - A workspace that cannot be created or opened is reported in one line instead of a stack trace.
 
 ### Fixed

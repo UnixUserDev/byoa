@@ -115,7 +115,7 @@ printed and tightened. Defaults:
 - **Filesystem is a read-allowlist, not a denylist.** Only the roots you list (`/usr`, `/etc`, …)
   plus the workspace are ever mounted. `$HOME`, `/run` and everything else simply do not exist
   inside the namespace. There is no `--ro-bind / /`.
-- **The workspace is the one read-write mount.** Because of that, `$HOME`, `/home` and `/` are
+- **The workspace is the one read-write mount.** Because of that, `$HOME`, its parent directory, and `/` are
   refused as workspaces unless you pass `--allow-home`; point it at a project directory instead.
 - **Network is denied** by default (`--unshare-all`). `--net allow-all` shares the host network.
 - **Environment is cleared** and rebuilt from an allowlist, so API keys do not cross the boundary.

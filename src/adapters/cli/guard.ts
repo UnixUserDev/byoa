@@ -1,5 +1,15 @@
+import { realpathSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, resolve } from "node:path"
+
+/** Resolve symlinks when the path exists; fall back to a lexical resolve otherwise. */
+function canonical(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return resolve(path)
+  }
+}
 
 /**
  * Why a directory is too broad to use as the agent's workspace.
@@ -11,11 +21,22 @@ import { dirname, resolve } from "node:path"
  * Returns null when the directory is fine.
  */
 export function broadWorkspaceReason(cwd: string): string | null {
-  const home = resolve(homedir())
-  const target = resolve(cwd)
+  // Realpath first: a symlink to $HOME is still $HOME once it is mounted.
+  const home = canonical(homedir())
+  const target = canonical(cwd)
 
   if (target === home) return "it is your home directory"
-  if (target === resolve("/")) return "it is the filesystem root"
-  if (target === dirname(home)) return `it is the parent of your home directory (${dirname(home)})`
+  if (target === canonical("/")) return "it is the filesystem root"
+  if (target === canonical(dirname(home))) return `it is the parent of your home directory (${dirname(home)})`
+  return null
+}
+
+/** Existence/type check for a workspace. Breadth is `broadWorkspaceReason`, which has an opt-out. */
+export function workspaceProblem(cwd: string): string | null {
+  try {
+    if (!statSync(cwd).isDirectory()) return "it is not a directory"
+  } catch {
+    return "it does not exist"
+  }
   return null
 }

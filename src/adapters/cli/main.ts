@@ -1,7 +1,6 @@
 import { parseArgs } from "node:util"
 import { createInterface } from "node:readline/promises"
 import { resolve } from "node:path"
-import { existsSync } from "node:fs"
 import { Agent } from "../../core/agent.ts"
 import { createProvider, resolveProvider } from "../../providers/registry.ts"
 import type { ResolvedProvider } from "../../providers/registry.ts"
@@ -23,7 +22,7 @@ import type { MemoryStore } from "../../memory/types.ts"
 import { createRenderer } from "./render.ts"
 import type { Renderer } from "./render.ts"
 import { runTui, shouldUseTui } from "../tui/run.ts"
-import { broadWorkspaceReason } from "./guard.ts"
+import { broadWorkspaceReason, workspaceProblem } from "./guard.ts"
 import { VERSION } from "../../version.ts"
 
 const HELP = `byoa ${VERSION} - bring-your-own-agent
@@ -137,18 +136,18 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   const cwd = resolve(asString(values.cwd) ?? process.cwd())
-  if (!existsSync(cwd)) {
-    stderr(`--cwd does not exist: ${cwd}`)
+  // Existence and type are always errors; breadth is a warning that needs an explicit opt-in.
+  const problem = workspaceProblem(cwd)
+  if (problem !== null) {
+    stderr(`refusing to use ${cwd} as the workspace: ${problem}`)
     return 2
   }
-  // The workspace is the sandbox's read-write mount. `$HOME` (or `/`) as the workspace means the
-  // model can read and write everything you own, so it needs an explicit opt-in.
-  const broad = broadWorkspaceReason(cwd)
-  if (broad !== null && !asBool(values["allow-home"])) {
-    stderr(
-      `refusing to use ${cwd} as the workspace: ${broad}. cd into a project, pass --cwd <dir>, or --allow-home to override.`,
-    )
-    return 2
+  if (!asBool(values["allow-home"])) {
+    const broad = broadWorkspaceReason(cwd)
+    if (broad !== null) {
+      stderr(`refusing to use ${cwd} as the workspace: ${broad}. pass --cwd <dir>, or --allow-home to override.`)
+      return 2
+    }
   }
   const loaded = loadConfig(asString(values.config) ?? configPath())
   for (const warning of loaded.warnings) stderr(`config: ${warning}`)
