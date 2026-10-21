@@ -2,7 +2,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { Agent, DEFAULT_MAX_STEPS } from "../../src/core/agent.ts"
 import { ToolRegistry } from "../../src/tools/registry.ts"
-import { clonePolicy, DEFAULT_POLICY } from "../../src/sandbox/policy.ts"
+import { clonePolicy, DEFAULT_POLICY, mergePolicy } from "../../src/sandbox/policy.ts"
 import { withCapabilities } from "../../src/providers/types.ts"
 import type { ModelCapabilities, Provider, ProviderEvent, ProviderRequest } from "../../src/providers/types.ts"
 import type { Tool } from "../../src/tools/types.ts"
@@ -71,12 +71,13 @@ const finalStep: ProviderEvent[] = [
 ]
 
 function makeAgent(provider: Provider, tools: ToolRegistry, options: { maxSteps?: number; history?: ProviderMessage[]; tier?: "lite" | "normal" | "large" } = {}): Agent {
+  const policy = mergePolicy(clonePolicy(DEFAULT_POLICY), { strict: false })
   return new Agent({
     provider,
     model: "fake-1",
     tier: options.tier ?? "normal",
     tools,
-    policy: clonePolicy(DEFAULT_POLICY),
+    policy,
     cwd: "/tmp",
     ...(options.maxSteps === undefined ? {} : { maxSteps: options.maxSteps }),
     ...(options.history === undefined ? {} : { initialHistory: options.history }),
