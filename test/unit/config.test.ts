@@ -83,3 +83,77 @@ test("redact scrubs credentials out of text", () => {
   assert.match(redact("x-api-key: supersecretvalue123"), /\*\*\*/)
   assert.match(redact("token ghp_abcdefghijklmnop"), /\*\*\*/)
 })
+
+test("the extension sections default to off and empty", () => {
+  const loaded = loadConfig(join(tmpdir(), "definitely-not-here", "config2.json"))
+  assert.deepEqual(loaded.config.plugins.enabled, [], "no plugin runs unless it is named")
+  assert.equal(loaded.config.plugins.dir.endsWith("byoa/plugins"), true)
+  assert.deepEqual(loaded.config.mcp.servers, [])
+  assert.deepEqual(loaded.config.subagents, { enabled: true, maxDepth: 2, maxSteps: 12 })
+})
+
+test("an old config file without the extension keys still loads", () => {
+  const path = writeConfig({ defaults: { provider: "ollama", tier: "normal" } })
+  const loaded = loadConfig(path)
+  assert.equal(loaded.config.defaults.provider, "ollama")
+  assert.deepEqual(loaded.config.plugins.enabled, [])
+  assert.equal(loaded.config.subagents.enabled, true)
+})
+
+test("plugins.enabled keeps only usable ids", () => {
+  const path = writeConfig({ plugins: { enabled: ["alpha", "", 42, null, "beta"] } })
+  const loaded = loadConfig(path)
+  assert.deepEqual(loaded.config.plugins.enabled, ["alpha", "beta"])
+})
+
+test("a plugin directory can be relocated", () => {
+  const path = writeConfig({ plugins: { dir: "/srv/byoa/plugins", enabled: ["x"] } })
+  const loaded = loadConfig(path)
+  assert.equal(loaded.config.plugins.dir, "/srv/byoa/plugins")
+  assert.deepEqual(loaded.config.plugins.enabled, ["x"])
+})
+
+test("mcp servers are read, and an unnamed one is dropped with a warning", () => {
+  const path = writeConfig({
+    mcp: {
+      servers: [
+        { name: "notes", transport: "stdio", command: "node", args: ["server.js"] },
+        { transport: "http", url: "http://localhost:1/mcp" },
+      ],
+    },
+  })
+  const loaded = loadConfig(path)
+  assert.deepEqual(loaded.config.mcp.servers.map((server) => server.name), ["notes"])
+  assert.ok(loaded.warnings.some((warning) => warning.includes("mcp: ignoring a server entry with no name")))
+})
+
+test("subagent limits can be tightened in config", () => {
+  const path = writeConfig({ subagents: { enabled: false, maxDepth: 0, maxSteps: 3 } })
+  const loaded = loadConfig(path)
+  assert.equal(loaded.config.subagents.enabled, false)
+  assert.equal(loaded.config.subagents.maxDepth, 0)
+  assert.equal(loaded.config.subagents.maxSteps, 3)
+})
+
+test("numeric ceilings are clamped, because JSON is not typed", () => {
+  const path = writeConfig({ subagents: { maxDepth: "many", maxSteps: 0, maxTokens: -5 } })
+  const loaded = loadConfig(path)
+  // A NaN comparison would silently remove the ceiling instead of tightening it.
+  assert.equal(loaded.config.subagents.maxDepth, 2, "an unusable depth falls back to the default")
+  assert.equal(loaded.config.subagents.maxSteps, 1, "a step cap of zero would stall every child")
+  assert.equal(loaded.config.subagents.maxTokens, undefined, "a negative budget means no budget")
+})
+
+test("a reasonable token ceiling survives", () => {
+  const path = writeConfig({ subagents: { maxTokens: 4000 } })
+  assert.equal(loadConfig(path).config.subagents.maxTokens, 4000)
+})
+
+test("a null ceiling falls back instead of becoming zero", () => {
+  const path = writeConfig({ subagents: { maxDepth: null, maxSteps: "", maxTokens: null } })
+  const loaded = loadConfig(path)
+  // Number(null) is 0, which would have silently meant "no delegation at all" and "one step".
+  assert.equal(loaded.config.subagents.maxDepth, 2)
+  assert.equal(loaded.config.subagents.maxSteps, 12)
+  assert.equal(loaded.config.subagents.maxTokens, undefined)
+})

@@ -3,6 +3,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { DEFAULT_CONFIG } from "./defaults.ts"
 import type { ByoaConfig, ProviderSettings } from "./schema.ts"
+import type { McpServerConfig } from "../mcp/types.ts"
 
 export function configPath(): string {
   const override = process.env.BYOA_CONFIG
@@ -80,7 +81,60 @@ export function loadConfig(path: string = configPath()): LoadedConfig {
   if (raw.memory) config.memory = { ...config.memory, ...raw.memory, recall: { ...config.memory.recall, ...raw.memory.recall } }
   if (raw.store) config.store = { ...config.store, ...raw.store }
 
+  if (raw.plugins) {
+    config.plugins = {
+      ...config.plugins,
+      ...raw.plugins,
+      enabled: Array.isArray(raw.plugins.enabled)
+        ? raw.plugins.enabled.filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+        : config.plugins.enabled,
+    }
+  }
+
+  if (raw.subagents) {
+    const candidate = raw.subagents as unknown as Record<string, unknown>
+    const depth = clampInt(candidate.maxDepth, config.subagents.maxDepth, 0, 8)
+    const steps = clampInt(candidate.maxSteps, config.subagents.maxSteps, 1, 100)
+    const tokens = clampInt(candidate.maxTokens, 0, 0, 1_000_000)
+    config.subagents = {
+      enabled: typeof candidate.enabled === "boolean" ? candidate.enabled : config.subagents.enabled,
+      maxDepth: depth,
+      maxSteps: steps,
+      // 0 is "no ceiling", which is the only way to express "unset" in JSON without a sentinel.
+      ...(tokens > 0 ? { maxTokens: tokens } : {}),
+    }
+  }
+
+  // Servers declared here win over a plugin's declaration of the same name (see composeMcpServers).
+  // Entries without a usable name are dropped with a warning rather than becoming an unnamed
+  // connection nobody can turn off.
+  if (raw.mcp && Array.isArray(raw.mcp.servers)) {
+    const servers: McpServerConfig[] = []
+    for (const entry of raw.mcp.servers) {
+      if (!entry || typeof entry !== "object" || typeof entry.name !== "string" || entry.name.length === 0) {
+        warnings.push("mcp: ignoring a server entry with no name")
+        continue
+      }
+      servers.push(entry)
+    }
+    config.mcp = { servers }
+  }
+
   return { config, path, warnings, found: true }
+}
+
+/**
+ * JSON is not typed. A string `maxDepth` would make `depth >= maxDepth` compare against NaN -
+ * always false - which silently removes the nesting ceiling instead of tightening it.
+ */
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  // `Number(null)` and `Number("")` are both 0, which would turn a null typo into "disable the
+  // ceiling" (maxSteps 1, maxDepth 0). Only an actual number or numeric string gets used.
+  if (value === null || value === undefined || value === "") return fallback
+  const numeric = typeof value === "number" ? value : Number(value)
+  if (typeof value !== "number" && typeof value !== "string") return fallback
+  if (!Number.isFinite(numeric)) return fallback
+  return Math.min(max, Math.max(min, Math.floor(numeric)))
 }
 
 function mergeProvider(base: ProviderSettings, override: Partial<ProviderSettings>): ProviderSettings {

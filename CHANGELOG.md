@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.3.0 — 2026-10-22
+
+### Extensions
+
+All three extension points land in the same tool registry, and all three fail soft: a broken
+plugin or an unreachable server costs its own tools, never the session.
+
+- **Plugins.** ESM/TypeScript modules in `~/.config/byoa/plugins/` contribute tools, agent presets
+  and MCP server declarations. Namespaced `plugin__<id>__<tool>`; `task`, `mcp__*` and `plugin__*`
+  are reserved. Failure to import, a bad manifest, a throwing `activate()` or a duplicate id skips
+  that plugin only. Nothing loads unless it is named in `plugins.enabled`.
+- **MCP client.** stdio (newline JSON-RPC, `Content-Length` framing tolerated) and Streamable HTTP
+  (POST + SSE, `Mcp-Session-Id`). Tools appear as `mcp__<server>__<tool>` with their own JSON Schema,
+  default `mutating: true`, per-call timeout, per-result cap, scrubbed child environment, and clean
+  teardown. `byoa mcp [--check]` lists servers and their tools.
+- **Subagents.** The `task` tool delegates one job to a child agent with its own context, step
+  budget and a depth ceiling, and returns only the child's final answer. Children are recorded as
+  sessions (`byoa sessions --tree`), inherit the approval gate through the parent, and are cancelled
+  with it. Gated by `subagents.enabled`.
+
+### Core
+
+- `ToolContext` gained `depth` and `sessionId`; `Agent` gained `depth` and `systemSuffix`, so a child
+  run can carry its own stable instruction segment in the cached prompt prefix.
+- Config gained `plugins`, `mcp` and `subagents` sections. Old files keep working unchanged.
+- Schema v2: `sessions.parent_id`. `migrate()` is now a stepped, idempotent migration inside a
+  transaction instead of a single stamped `CREATE TABLE IF NOT EXISTS` run - the old shape silently
+  skipped `ALTER` work on an existing database.
+
+### CLI
+
+- `byoa plugins [--check]`, `byoa mcp [--check]`, `byoa sessions --tree`.
+- Listing never imports or spawns anything; `--check` is the opt-in.
+- One shutdown path closes MCP children, plugin teardown hooks, memory and the session database.
+
+### Honesty
+
+- Plugins run in-process with full privileges. MCP servers are host-side code that `--net deny`
+  does not reach. Both are documented in the README rather than implied to be sandboxed.
+
 ## 0.2.2 — 2026-10-21
 
 ### Hardening

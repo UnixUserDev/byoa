@@ -87,7 +87,7 @@ export function createRenderer(options: RendererOptions = {}): Renderer {
           )
           break
         case "approval.request":
-          line(yellow(`  ? approval needed: ${event.kind} ${summarize(event.detail)}`))
+          line(yellow(`  ? approval needed: ${event.kind} ${summarize(event.detail)} - /approve or /deny`))
           break
         case "usage":
           // The turn started at turn.start, so the elapsed wall-clock here is a fair measure

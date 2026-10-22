@@ -41,6 +41,13 @@ export interface AgentOptions {
    * provider already in use, which is not what the command says.
    */
   resolveProvider?: (providerId: string) => Provider | undefined
+  /**
+   * Extra stable system text, appended after the tier persona. Used by subagent runs to give the
+   * child its own instructions without inventing a fourth tier.
+   */
+  systemSuffix?: string
+  /** Nesting depth. Top-level is 0; a subagent run is parent depth + 1. */
+  depth?: number
 }
 
 export const DEFAULT_MAX_STEPS = 24
@@ -66,6 +73,8 @@ export class Agent implements AgentHandle {
   readonly #history: ProviderMessage[]
   readonly #approvals = new Map<string, (allow: boolean) => void>()
   readonly #resolveProvider: ((providerId: string) => Provider | undefined) | null
+  readonly #systemSuffix: string | undefined
+  readonly #depth: number
 
   #provider: Provider
   #model: string
@@ -93,6 +102,8 @@ export class Agent implements AgentHandle {
     this.#maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS
     this.#approvalMode = options.approvalMode ?? "auto"
     this.#resolveProvider = options.resolveProvider ?? null
+    this.#systemSuffix = options.systemSuffix?.trim() ? options.systemSuffix : undefined
+    this.#depth = options.depth ?? 0
     this.#history = options.initialHistory ? [...options.initialHistory] : []
 
     this.#bus.push({
@@ -431,7 +442,7 @@ export class Agent implements AgentHandle {
     const capabilities = this.#provider.capabilities(this.#model)
     const request = buildRequest({
       model: this.#model,
-      system: buildSystemSegments(tier, this.#memoryBlock),
+      system: buildSystemSegments(tier, this.#memoryBlock, this.#systemSuffix),
       // A copy: `#trimHistory` returns the live history by reference when it fits, and handing that
       // to a provider means a provider that retains the request can watch messages appear after its
       // own call - or mutate agent state. Cheap insurance at one call site.
@@ -561,7 +572,14 @@ export class Agent implements AgentHandle {
       policy: this.#policy,
       signal,
       memory: this.#memory,
-      requestApproval: (request) => this.#requestApproval(newId("apr"), request.kind, request.detail),
+      sessionId: this.#id,
+      depth: this.#depth,
+      // In `auto` mode nothing is reading approval events, so a tool that asks would wait forever
+      // for an answer that can never arrive. Fail the tool instead of hanging the turn.
+      requestApproval: (request) =>
+        this.#approvalMode === "ask"
+          ? this.#requestApproval(newId("apr"), request.kind, request.detail)
+          : Promise.reject(new Error("no approval channel: nothing is answering approval requests (run with --ask)")),
     }
 
     let result: ToolResult

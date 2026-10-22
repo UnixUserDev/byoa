@@ -9,11 +9,16 @@ import type { PromptTier } from "../prompts/tiers.ts"
  * volatile memory digest appended LAST as its own segment. Anything that changes per-request
  * placed before the stable prefix would invalidate the cached prefix on every single turn.
  */
-export function buildSystemSegments(tier: PromptTier, memoryBlock?: string): SystemSegment[] {
+export function buildSystemSegments(tier: PromptTier, memoryBlock?: string, suffix?: string): SystemSegment[] {
   const segments: SystemSegment[] = [
     { text: tier.persona, stable: true, cache: true },
     { text: tier.safety, stable: true, cache: true },
   ]
+  // A subagent's own instructions are stable for the life of that run, so they belong in the
+  // cached prefix rather than being re-stated in the user message every turn.
+  if (suffix && suffix.trim().length > 0) {
+    segments.push({ text: suffix.trim(), stable: true, cache: true })
+  }
   if (memoryBlock && memoryBlock.trim().length > 0) {
     segments.push({ text: memoryBlock, stable: false })
   }

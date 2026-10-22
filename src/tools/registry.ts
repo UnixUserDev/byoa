@@ -27,6 +27,25 @@ export class ToolRegistry {
     return this.list().map(schemaOf)
   }
 
+  /** A restricted copy. Unknown names are ignored, so a preset can name a tool that is absent. */
+  pick(names: string[]): ToolRegistry {
+    const subset = new ToolRegistry()
+    for (const name of names) {
+      const tool = this.#tools.get(name)
+      if (tool) subset.register(tool)
+    }
+    return subset
+  }
+
+  without(names: string[]): ToolRegistry {
+    const drop = new Set(names)
+    const subset = new ToolRegistry()
+    for (const tool of this.#tools.values()) {
+      if (!drop.has(tool.name)) subset.register(tool)
+    }
+    return subset
+  }
+
   get size(): number {
     return this.#tools.size
   }

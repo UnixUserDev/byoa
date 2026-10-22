@@ -11,10 +11,11 @@ only; the optional TUI uses `@opentui/core`, which ships beside the release bina
 
 ## Status
 
-**v0.2.2 — usable, and honest about it.** The core, the provider layer, session persistence, the
-tool set, the sandbox, Obsidian-backed memory and the terminal UI are implemented and tested. The
-CLI and the TUI are the frontends that ship today. Web and Electron adapters are planned but
-**not** in this release; neither are MCP, subagents, or web fetch/search.
+**v0.3.0 — usable, extensible, and honest about it.** The core, the provider layer, session
+persistence, the tool set, the sandbox, Obsidian-backed memory, the terminal UI, an extension layer
+(plugins, MCP client, subagents) are implemented and tested. The CLI and the TUI are the frontends
+that ship today. Web and Electron adapters are planned but **not** in this release; nor is web
+fetch/search.
 
 ## Requirements
 
@@ -33,7 +34,7 @@ so a tarball of the TypeScript source is not a runnable install.
 
 ```bash
 mkdir -p ~/.local/lib/byoa ~/.local/bin
-tar -xzf byoa-0.2.2-linux-x64.tar.gz -C ~/.local/lib/byoa
+tar -xzf byoa-0.3.0-linux-x64.tar.gz -C ~/.local/lib/byoa
 ln -sf ~/.local/lib/byoa/byoa ~/.local/bin/byoa
 byoa --version
 ```
@@ -45,7 +46,7 @@ Keep the extracted directory together: the launcher resolves `@opentui/core` fro
 **npm-installable tarball:**
 
 ```bash
-npm install -g ./byoa-0.2.2-npm.tgz
+npm install -g ./byoa-0.3.0-npm.tgz
 byoa --version
 ```
 
@@ -107,6 +108,111 @@ Any OpenAI-compatible endpoint works, including a custom base URL and headers.
 The tier is picked from the model by default (`--tier` overrides). It scales the persona, the
 context budget, the per-tool-result ceiling and the output cap as one decision.
 
+## Extensions
+
+Three ways to add capability, all landing in the same tool registry. They share one rule: a broken
+extension costs its own tools and nothing else. Startup never dies because of one.
+
+```
+byoa plugins            # what is on disk, and what is enabled (imports nothing)
+byoa plugins --check    # import them and report what they contribute
+byoa mcp                # configured servers (connects to nothing)
+byoa mcp --check        # start them and list their tools
+byoa sessions --tree    # sessions and the subagent runs they spawned
+```
+
+### Plugins
+
+Files in `~/.config/byoa/plugins/`, one `.ts`/`.mts`/`.js`/`.mjs`/`.cjs` per plugin, or a folder with
+an `index.*`. TypeScript needs no build step — Node strips the types on import. Listing a plugin in
+`plugins.enabled` is what makes it run; dropping a file in the directory does nothing by itself.
+An entry may also be a path (`"./scratch/x.ts"`, `/abs/path.ts`) — handy for trying one out before
+installing it. The directory is a convention, not a boundary: `enabled` is the boundary.
+
+```ts
+export default {
+  id: "hello",
+  name: "Hello",
+  version: "1.0.0",
+  tools: [
+    {
+      name: "shout",
+      description: "uppercase the given text",
+      mutating: false,
+      parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+      async run(args) {
+        return { ok: true, content: String(args.text).toUpperCase() }
+      },
+    },
+  ],
+  agents: [{ name: "greeter", prompt: "You greet people and nothing else." }],
+  mcpServers: [{ name: "notes", transport: "stdio", command: "my-mcp-server" }],
+  activate(ctx) { ctx.log("ready") },
+  deactivate() {},
+}
+```
+
+Contributed tools are namespaced `plugin__<id>__<tool>`, so they cannot shadow a builtin. `task`,
+`mcp__*` and `plugin__*` are reserved.
+
+**Plugins are your own code.** They run in the byoa process with your full privileges — your files,
+your environment, your network. There is no sandbox around plugin code and this README will not
+pretend otherwise. Enable only plugins you would run as a shell script.
+
+### MCP
+
+Servers are declared in config, or by a plugin (config wins on a name clash, field by field):
+
+```json
+{
+  "mcp": {
+    "servers": [
+      { "name": "notes", "transport": "stdio", "command": "npx", "args": ["-y", "@me/notes-mcp"] },
+      { "name": "docs", "transport": "http", "url": "https://mcp.example.com/mcp" }
+    ]
+  }
+}
+```
+
+- **stdio:** newline-delimited JSON-RPC 2.0. LSP-style `Content-Length:` framing is also accepted,
+  because a real share of servers speak it.
+- **http:** Streamable HTTP, one POST per message, JSON or SSE replies, `Mcp-Session-Id` carried.
+  Server-initiated notifications over a long-lived GET stream are **not** supported.
+- Tools appear as `mcp__<server>__<tool>` with the server's own JSON Schema, and default to
+  `mutating: true` so `--ask` gates them. `"mutating": false` opts a server out; only do that for a
+  server you trust with your files.
+- Per-call timeout (`callTimeoutMs`, default 60s) and result cap (`maxResultChars`, default 64KiB).
+- The child process gets a scrubbed environment (no inherited API keys) plus whatever `env` names.
+
+**MCP is host-side code.** `--net deny` governs commands run through the sandbox; it does not
+govern a stdio server's own syscalls or an HTTP call made from this process. byoa warns when you
+configure an HTTP server while the sandbox denies network, because the alternative is implying an
+isolation you do not have.
+
+### Subagents
+
+With `subagents.enabled` (the default), the model gets one extra tool: `task`. It delegates a
+self-contained job to a child agent with its own context and returns the child's **final answer
+only** — the intermediate transcript never enters the parent's context.
+
+```
+ceiling: subagents.maxDepth (default 2)   subagents.maxSteps (default 12)
+```
+
+- The child is a real session (`byoa sessions --tree` shows the parent link), so its transcript is
+  inspectable and resumable.
+- A child at the depth ceiling is never offered `task` at all, and the tool refuses before spawning
+  anything.
+- The child gets no vault memory, and no mutating parent privileges it did not already have: its own
+  tools carry their own approval flags, so `--ask` still gates a destructive step.
+- Cancelling the parent cancels the child. A token budget (`maxTokens`) can cut a chatty run.
+- `task` is `mutating: false` — the delegation itself is not a write; what the child does is.
+- Children inherit the provider and model the session started with. `agent` presets (from plugins)
+  can override provider, model, tier and tool subset; naming a provider that is not configured is
+  an error, not a silent fallback to the parent's.
+- Children get no vault memory and no inherited environment, which is a deliberate narrowing of
+  what a delegated job can see.
+
 ## Sandbox
 
 The sandbox is a **policy object first** and a `bwrap` invocation second, so it can be inspected,
@@ -154,6 +260,17 @@ embeddings, no server, no database to babysit.
 
 `~/.config/byoa/config.json` (or `--config`), `~/.local/share/byoa/byoa.db` for sessions (or
 `--db` / `BYOA_DB`), and `BYOA_VAULT` for the Obsidian vault path.
+
+```json
+{
+  "plugins":   { "dir": "~/.config/byoa/plugins", "enabled": [] },
+  "mcp":       { "servers": [] },
+  "subagents": { "enabled": true, "maxDepth": 2, "maxSteps": 12, "maxTokens": 4000 }
+}
+```
+
+Old config files keep working: anything missing falls back to the defaults above, and an empty
+`plugins.enabled` means "run no plugin", not "run every plugin".
 
 ## Development
 

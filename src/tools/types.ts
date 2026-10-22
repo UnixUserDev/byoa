@@ -18,10 +18,16 @@ export interface ToolContext {
   policy: SandboxPolicy
   signal: AbortSignal
   memory: MemoryStore | null
+  /** The session this tool call belongs to. */
+  sessionId?: string
   /**
-   * Ask the human. The agent supplies this only in `ask` mode, where a frontend is known to be
-   * attached and reading events - an adapter that cannot answer must not start the session in ask
-   * mode, because the returned promise has nothing to settle it.
+   * How many subagent hops below the user this run sits. 0 is the top-level agent. A delegating
+   * tool reads it to refuse past its depth budget; everything else can ignore it.
+   */
+  depth?: number
+  /**
+   * Ask the human. Settles only in `ask` mode, where a frontend is reading events; in `auto` mode
+   * the returned promise rejects immediately rather than waiting for an answer that cannot come.
    */
   requestApproval(request: ApprovalRequest): Promise<boolean>
 }

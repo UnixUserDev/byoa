@@ -7,6 +7,7 @@ import type { ResolvedProvider } from "../../providers/registry.ts"
 import { configPath, loadConfig } from "../../config/load.ts"
 import { ToolRegistry } from "../../tools/registry.ts"
 import { createDefaultTools } from "../../tools/index.ts"
+import { composeTools } from "../../tools/compose.ts"
 import { assertTierId, isTierId, suggestTier, TIERS } from "../../prompts/tiers.ts"
 import type { TierId } from "../../prompts/tiers.ts"
 import { clonePolicy, mergePolicy, validatePolicy } from "../../sandbox/policy.ts"
@@ -24,13 +25,23 @@ import type { Renderer } from "./render.ts"
 import { runTui, shouldUseTui } from "../tui/run.ts"
 import { broadWorkspaceReason, workspaceProblem } from "./guard.ts"
 import { VERSION } from "../../version.ts"
+import { redact } from "../../config/secrets.ts"
+import { listPluginCandidates, loadPlugins } from "../../plugins/loader.ts"
+import type { PluginLoadResult } from "../../plugins/types.ts"
+import { McpManager } from "../../mcp/manager.ts"
+import { composeMcpServers } from "../../mcp/adapter.ts"
+import { SubagentRunner } from "../../agents/runner.ts"
+import { createTaskTool } from "../../agents/task-tool.ts"
+import type { Tool } from "../../tools/types.ts"
 
 const HELP = `byoa ${VERSION} - bring-your-own-agent
 
 Usage:
   byoa [options] [prompt]
-  byoa sessions [--limit <n>] [--match <text>]
-  byoa providers
+  byoa sessions [--limit <n>] [--match <text>] [--tree] [--db <path>]
+  byoa providers [--config <path>]
+  byoa plugins [--check] [--config <path>]
+  byoa mcp [--config <path>]
 
 Options:
   -p, --prompt <text>     run a single turn and exit
@@ -53,7 +64,7 @@ Options:
   -v, --version           print the version
 
 Interactive commands:
-  /help  /exit  /cancel  /tier <tier>  /model <id>  /policy`
+  /help  /exit  /cancel  /approve  /deny  /tier <tier>  /model <id>  /policy`
 
 const OPTIONS = {
   prompt: { type: "string", short: "p" },
@@ -106,6 +117,8 @@ function formatWhen(millis: number): string {
 export async function main(argv: string[]): Promise<number> {
   if (argv[0] === "sessions") return listSessions(argv.slice(1))
   if (argv[0] === "providers") return listProviders(argv.slice(1))
+  if (argv[0] === "plugins") return listPlugins(argv.slice(1))
+  if (argv[0] === "mcp") return listMcp(argv.slice(1))
 
   let parsed: ReturnType<typeof parseArgs>
   try {
@@ -175,6 +188,20 @@ export async function main(argv: string[]): Promise<number> {
     memory = null
   }
 
+  // One exit path for everything that owns a resource: MCP children, plugin teardown, the memory
+  // store and the session database. Every early return below goes through it.
+  let mcp: McpManager | null = null
+  const extraTeardown: Array<() => Promise<void>> = []
+  const shutdown = async (): Promise<void> => {
+    await mcp?.close().catch(() => undefined)
+    mcp = null
+    for (const hook of extraTeardown.splice(0)) {
+      await hook().catch(() => undefined)
+    }
+    memory?.close()
+    store.close()
+  }
+
   // Resolve the session first: when resuming, the stored model, tier and policy are the defaults
   // and only an explicit flag overrides them. Otherwise `--resume` would silently reset you to
   // the fake provider.
@@ -182,8 +209,7 @@ export async function main(argv: string[]): Promise<number> {
   const record = resumeArgument ? findSession(store, resumeArgument) : null
   if (resumeArgument && !record) {
     stderr(`no session matches '${resumeArgument}' - try: byoa sessions`)
-    memory?.close()
-    store.close()
+    await shutdown()
     return 1
   }
 
@@ -194,8 +220,7 @@ export async function main(argv: string[]): Promise<number> {
     resolved = resolveProvider(config, providerId)
   } catch (error: unknown) {
     stderr(error instanceof Error ? error.message : String(error))
-    memory?.close()
-    store.close()
+    await shutdown()
     return 2
   }
   for (const warning of resolved.warnings) stderr(`config: ${warning}`)
@@ -204,8 +229,7 @@ export async function main(argv: string[]): Promise<number> {
     asString(values.model) ?? record?.model ?? config.defaults.model ?? (providerId === "fake" ? "fake-1" : "")
   if (model.length === 0) {
     stderr(`--model is required when using provider '${providerId}'`)
-    memory?.close()
-    store.close()
+    await shutdown()
     return 2
   }
 
@@ -248,8 +272,7 @@ export async function main(argv: string[]): Promise<number> {
   const problems = validatePolicy(policy)
   if (problems.length > 0) {
     for (const problem of problems) stderr(`policy: ${problem}`)
-    memory?.close()
-    store.close()
+    await shutdown()
     return 2
   }
 
@@ -275,11 +298,76 @@ export async function main(argv: string[]): Promise<number> {
     stderr("warning: --ask needs an interactive terminal; running with approvals off")
   }
 
+  // ---- extension layer -----------------------------------------------------
+  // Plugins first, because a plugin may contribute MCP servers, and both may contribute tools.
+  // Every step here is fail-soft: a broken extension costs its own tools, never the session.
+  const pluginResult: PluginLoadResult = await loadPlugins({
+    dir: config.plugins.dir,
+    enabled: config.plugins.enabled,
+    log: (message) => stderr(message),
+  })
+  extraTeardown.push(...pluginResult.teardown)
+
+  const servers = composeMcpServers(config.mcp.servers, pluginResult.mcpServers)
+  if (servers.length > 0) {
+    mcp = new McpManager({ servers, log: (message) => stderr(message) })
+    await mcp.start()
+    const down = mcp.status().filter((status) => !status.ok)
+    if (down.length > 0) {
+      stderr(`mcp: ${down.length} of ${servers.length} server(s) unavailable - continuing without them`)
+    }
+    // An MCP server is host-side code. Saying so once is the difference between a boundary and a
+    // surprise, because --net deny does not reach it.
+    if (policy.network.mode === "deny" && servers.some((server) => server.transport === "http")) {
+      stderr("warning: http MCP servers are called from this process, outside the sandbox's network policy")
+    }
+  }
+
+  const tools = createDefaultTools()
+  const addTool = (tool: Tool, source: string): void => {
+    composeTools(tools, [{ tool, source }], (message) => stderr(message))
+  }
+  for (const tool of pluginResult.tools) addTool(tool, "a plugin")
+  for (const tool of mcp?.tools() ?? []) addTool(tool, "an MCP server")
+
+  // Lets `/model` and `set.model` switch provider for real, not just relabel the current one.
+  const resolveProviderId = (id: string): ReturnType<typeof createProvider> | undefined => {
+    try {
+      return createProvider(resolveProvider(config, id), { model })
+    } catch {
+      return undefined
+    }
+  }
+
+  const runner = new SubagentRunner({
+    store,
+    provider,
+    model,
+    tier,
+    tools,
+    policy,
+    cwd,
+    approvalMode: canAsk ? "ask" : "auto",
+    resolveProvider: resolveProviderId,
+  })
+  if (config.subagents.enabled) {
+    addTool(
+      createTaskTool({
+        runner,
+        presets: pluginResult.agents,
+        maxDepth: config.subagents.maxDepth,
+        maxSteps: config.subagents.maxSteps,
+        ...(config.subagents.maxTokens === undefined ? {} : { maxTokens: config.subagents.maxTokens }),
+      }),
+      "subagents",
+    )
+  }
+
   const agent = new Agent({
     provider,
     model,
     tier,
-    tools: createDefaultTools(),
+    tools,
     policy,
     cwd,
     id: session.id,
@@ -288,14 +376,7 @@ export async function main(argv: string[]): Promise<number> {
     persistence: store.toPersistence(session.id),
     initialHistory: history,
     memory,
-    // Lets `/model` and `set.model` switch provider for real, not just relabel the current one.
-    resolveProvider: (id) => {
-      try {
-        return createProvider(resolveProvider(config, id), { model })
-      } catch {
-        return undefined
-      }
-    },
+    resolveProvider: resolveProviderId,
   })
 
   const color = !asBool(values["no-color"]) && process.stdout.isTTY === true
@@ -329,8 +410,7 @@ export async function main(argv: string[]): Promise<number> {
           ...(promptText.length > 0 ? { prompt: promptText } : {}),
           onSessionChange: persistModel,
         })
-        memory?.close()
-        store.close()
+        await shutdown()
         return code
       } catch (error: unknown) {
         stderr(
@@ -354,8 +434,7 @@ export async function main(argv: string[]): Promise<number> {
     agent.send({ t: "submit", text: promptText })
     await finished
     await agent.dispose()
-    memory?.close()
-    store.close()
+    await shutdown()
     // A one-shot run is scriptable, so the exit code has to mean something: a failed turn must not
     // look like success to a shell.
     return finishReason === "stop" ? 0 : 1
@@ -365,14 +444,12 @@ export async function main(argv: string[]): Promise<number> {
   // unsettled-await warning from Node. Refuse with a usage message instead.
   if (process.stdin.isTTY !== true) {
     stderr('stdin is not a terminal - use -p "..." for one-shot mode')
-    memory?.close()
-    store.close()
+    await shutdown()
     return 2
   }
 
   const code = await runRepl(agent, renderer, persistModel)
-  memory?.close()
-  store.close()
+  await shutdown()
   return code
 }
 
@@ -383,12 +460,21 @@ function findSession(store: SqliteSessionStore, argument: string): SessionRecord
   return matches[0] ?? null
 }
 
+function sessionLine(record: SessionRecord, indent = 0): string {
+  return `${"  ".repeat(indent)}${record.id}  ${formatWhen(record.updatedAt)}  ${record.tier.padEnd(6)}  ${`${record.provider}/${record.model}`.padEnd(28)}  ${record.title}`
+}
+
 function listSessions(argv: string[]): number {
   let parsed: ReturnType<typeof parseArgs>
   try {
     parsed = parseArgs({
       args: argv,
-      options: { limit: { type: "string" }, match: { type: "string" }, db: { type: "string" } },
+      options: {
+        limit: { type: "string" },
+        match: { type: "string" },
+        db: { type: "string" },
+        tree: { type: "boolean" },
+      },
       allowPositionals: false,
     })
   } catch (error: unknown) {
@@ -401,17 +487,31 @@ function listSessions(argv: string[]): number {
   migrate(db)
   const store = new SqliteSessionStore(db)
 
-  const records = store.list({ limit: Number.isFinite(limit) ? limit : 20, ...(asString(parsed.values.match) ? { match: asString(parsed.values.match) as string } : {}) })
+  const records = store.list({
+    limit: Number.isFinite(limit) ? limit : 20,
+    ...(asString(parsed.values.match) ? { match: asString(parsed.values.match) as string } : {}),
+  })
   if (records.length === 0) {
     stdout(`no sessions in ${databasePath}`)
     store.close()
     return 0
   }
-  for (const record of records) {
-    stdout(
-      `${record.id}  ${formatWhen(record.updatedAt)}  ${record.tier.padEnd(6)}  ${`${record.provider}/${record.model}`.padEnd(28)}  ${record.title}`,
-    )
+  if (asBool(parsed.values.tree)) {
+    const seen = new Set<string>()
+    const print = (record: SessionRecord, depth: number): void => {
+      if (seen.has(record.id) || depth > 5) return
+      seen.add(record.id)
+      stdout(sessionLine(record, depth))
+      for (const child of store.listByParent(record.id)) print(child, depth + 1)
+    }
+    for (const record of records) {
+      if (record.parentId !== null && records.some((other) => other.id === record.parentId)) continue
+      print(record, 0)
+    }
+    store.close()
+    return 0
   }
+  for (const record of records) stdout(sessionLine(record))
   store.close()
   return 0
 }
@@ -447,6 +547,126 @@ function listProviders(argv: string[]): number {
   return 0
 }
 
+async function listPlugins(argv: string[]): Promise<number> {
+  let parsed: ReturnType<typeof parseArgs>
+  try {
+    parsed = parseArgs({
+      args: argv,
+      options: { config: { type: "string" }, check: { type: "boolean" } },
+      allowPositionals: false,
+    })
+  } catch (error: unknown) {
+    stderr(error instanceof Error ? error.message : String(error))
+    return 2
+  }
+
+  const loaded = loadConfig(asString(parsed.values.config) ?? configPath())
+  for (const warning of loaded.warnings) stderr(`config: ${warning}`)
+  const config = loaded.config
+  const enabled = new Set(config.plugins.enabled)
+
+  stdout(`config: ${loaded.path}${loaded.found ? "" : " (not found, using built-in defaults)"}`)
+  stdout(`dir:    ${config.plugins.dir}`)
+
+  // Listing does not import anything. A plugin is code with your privileges, and `byoa plugins`
+  // should not be a command that runs code you just wanted to look at. --check opts in.
+  const candidates = listPluginCandidates(config.plugins.dir)
+  if (candidates.length === 0) {
+    stdout("no plugins found - one .ts/.js file per plugin, or a folder with an index file")
+  } else {
+    for (const candidate of candidates) {
+      stdout(`${enabled.has(candidate.id) ? "[on] " : "[off]"} ${candidate.id.padEnd(24)} ${candidate.path}`)
+    }
+  }
+  for (const id of enabled) {
+    if (!candidates.some((candidate) => candidate.id === id)) {
+      stderr(`enabled but not found: ${id}`)
+    }
+  }
+
+  if (!asBool(parsed.values.check)) {
+    stdout("")
+    stdout("pass --check to import the enabled plugins and report what they contribute")
+    return 0
+  }
+
+  const result = await loadPlugins({
+    dir: config.plugins.dir,
+    enabled: config.plugins.enabled,
+    log: (message) => stderr(message),
+  })
+  stdout("")
+  for (const summary of result.loaded) {
+    stdout(
+      `${summary.id.padEnd(20)} v${summary.version.padEnd(8)} tools=${summary.tools} agents=${summary.agents} mcp=${summary.mcpServers}`,
+    )
+    for (const tool of result.tools.filter((entry) => entry.name.startsWith(`plugin__${summary.id}__`))) {
+      stdout(`  ${tool.name.padEnd(34)} ${tool.mutating ? "mutating" : "read-only"}`)
+    }
+  }
+  for (const failure of result.failed) stderr(`failed: ${failure.requested} - ${failure.reason}`)
+  for (const hook of result.teardown) await hook()
+  return result.failed.length === 0 ? 0 : 1
+}
+
+async function listMcp(argv: string[]): Promise<number> {
+  let parsed: ReturnType<typeof parseArgs>
+  try {
+    parsed = parseArgs({
+      args: argv,
+      options: { config: { type: "string" }, check: { type: "boolean" } },
+      allowPositionals: false,
+    })
+  } catch (error: unknown) {
+    stderr(error instanceof Error ? error.message : String(error))
+    return 2
+  }
+
+  const loaded = loadConfig(asString(parsed.values.config) ?? configPath())
+  for (const warning of loaded.warnings) stderr(`config: ${warning}`)
+  const config = loaded.config
+
+  // Plugin-declared servers are not listed until --check, because finding them means importing the
+  // plugins. Config-declared ones are always shown.
+  const configured = config.mcp.servers
+  if (configured.length === 0) {
+    stdout("no MCP servers configured (mcp.servers in the config file, or a plugin that declares them)")
+  }
+  for (const server of configured) {
+    const target =
+      server.transport === "stdio"
+        ? `${server.command ?? "?"} ${(server.args ?? []).join(" ")}`.trim()
+        : // A URL may carry `user:password@`; this prints to a terminal and possibly a log.
+          redact(server.url ?? "?")
+    stdout(`${server.name.padEnd(16)} ${server.transport.padEnd(6)} ${target}`)
+  }
+
+  if (!asBool(parsed.values.check)) {
+    stdout("")
+    stdout("pass --check to start the servers and list the tools they expose")
+    return 0
+  }
+
+  const pluginResult = await loadPlugins({
+    dir: config.plugins.dir,
+    enabled: config.plugins.enabled,
+    log: (message) => stderr(message),
+  })
+  const servers = composeMcpServers(configured, pluginResult.mcpServers)
+  const manager = new McpManager({ servers, log: (message) => stderr(message) })
+  await manager.start()
+  stdout("")
+  for (const status of manager.status()) {
+    stdout(
+      `${status.name.padEnd(16)} ${status.ok ? "ok  " : "FAIL"} ${String(status.tools).padStart(3)} tool(s)${status.reason ? `  ${status.reason}` : ""}`,
+    )
+  }
+  for (const tool of manager.tools()) stdout(`  ${tool.name}${tool.mutating ? " (mutating)" : ""}`)
+  await manager.close()
+  for (const hook of pluginResult.teardown) await hook()
+  return manager.status().every((status) => status.ok) ? 0 : 1
+}
+
 async function runRepl(
   agent: Agent,
   renderer: Renderer,
@@ -455,6 +675,11 @@ async function runRepl(
   const rl = createInterface({ input: process.stdin, output: process.stdout })
   let resolveTurn: (() => void) | null = null
   let closed = false
+  /**
+   * Approvals waiting on this terminal. Without this a `--ask` REPL printed "approval needed" and
+   * then waited forever: nothing in the CLI ever sent `approve`, only the TUI did.
+   */
+  const pending: Array<{ id: string; label: string }> = []
 
   // `rl.question()` never settles when stdin hits EOF; racing it against close is what stops the
   // process from leaving an unsettled top-level await (which makes Node exit 13).
@@ -491,7 +716,16 @@ async function runRepl(
       if (event.t === "session.info") {
         onSessionChange?.({ provider: event.provider, model: event.model, tier: event.tier })
       }
-      if (event.t === "turn.end") finishTurn()
+      if (event.t === "approval.request") {
+        pending.push({
+          id: event.id,
+          label: `${event.kind} ${typeof event.detail === "object" && event.detail !== null ? String((event.detail as { name?: unknown }).name ?? "") : ""}`.trim(),
+        })
+      }
+      if (event.t === "turn.end") {
+        pending.length = 0
+        finishTurn()
+      }
     }
   })()
 
@@ -522,6 +756,19 @@ async function runRepl(
       }
       if (command === "cancel") {
         agent.send({ t: "cancel" })
+        // The agent resolves its own approvals false immediately; clear the mirror so a fast
+        // /approve cannot claim to have allowed something that was already cancelled.
+        pending.length = 0
+        continue
+      }
+      if (command === "approve" || command === "deny") {
+        const target = pending.shift()
+        if (!target) {
+          stdout("nothing is waiting for approval")
+          continue
+        }
+        agent.send({ t: "approve", id: target.id, allow: command === "approve" })
+        stdout(`${command === "approve" ? "allowed" : "denied"}: ${target.label}`)
         continue
       }
       if (command === "tier") {

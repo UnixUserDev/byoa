@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   cwd         TEXT NOT NULL,
   policy      TEXT NOT NULL,
   tokens_in   INTEGER NOT NULL DEFAULT 0,
-  tokens_out  INTEGER NOT NULL DEFAULT 0
+  tokens_out  INTEGER NOT NULL DEFAULT 0,
+  parent_id   TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (

@@ -18,6 +18,8 @@ export interface SessionRecord {
   policy: SandboxPolicy
   tokensIn: number
   tokensOut: number
+  /** Set when this session was spawned as a subagent run. */
+  parentId: string | null
 }
 
 export interface StoredMessage {
@@ -35,6 +37,7 @@ export interface CreateSessionInput {
   tier: TierId
   cwd: string
   policy: SandboxPolicy
+  parentId?: string | null
 }
 
 interface SessionRow {
@@ -49,6 +52,7 @@ interface SessionRow {
   policy: string
   tokens_in: number
   tokens_out: number
+  parent_id?: string | null
 }
 
 interface MessageRow {
@@ -73,6 +77,7 @@ function toRecord(row: SessionRow): SessionRecord {
     policy: parsePolicy(row.policy),
     tokensIn: row.tokens_in,
     tokensOut: row.tokens_out,
+    parentId: row.parent_id ?? null,
   }
 }
 
@@ -166,8 +171,8 @@ export class SqliteSessionStore {
     const id = input.id ?? newId("ses")
     this.#db
       .prepare(
-        `INSERT INTO sessions (id, title, created_at, updated_at, provider, model, tier, cwd, policy)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO sessions (id, title, created_at, updated_at, provider, model, tier, cwd, policy, parent_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -179,6 +184,7 @@ export class SqliteSessionStore {
         input.tier,
         input.cwd,
         JSON.stringify(input.policy),
+        input.parentId ?? null,
       )
     const created = this.get(id)
     if (!created) throw new Error(`failed to create session ${id}`)
@@ -204,6 +210,14 @@ export class SqliteSessionStore {
     const rows = this.#db
       .prepare("SELECT * FROM sessions ORDER BY updated_at DESC LIMIT ?")
       .all(limit) as unknown as SessionRow[]
+    return rows.map(toRecord)
+  }
+
+  /** Direct children only. Callers walk the tree themselves; a recursive CTE buys nothing here. */
+  listByParent(parentId: string, options: { limit?: number } = {}): SessionRecord[] {
+    const rows = this.#db
+      .prepare("SELECT * FROM sessions WHERE parent_id = ? ORDER BY created_at ASC LIMIT ?")
+      .all(parentId, options.limit ?? 100) as unknown as SessionRow[]
     return rows.map(toRecord)
   }
 

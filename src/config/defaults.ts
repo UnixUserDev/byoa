@@ -8,6 +8,11 @@ export function defaultVaultPath(): string {
   return process.env.BYOA_VAULT ?? join(homedir(), "Documents", "Obsidian Vault")
 }
 
+export function defaultPluginsDir(): string {
+  const configHome = process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config")
+  return join(configHome, "byoa", "plugins")
+}
+
 export function DEFAULT_CONFIG(): ByoaConfig {
   const home = homedir()
   const sandbox = clonePolicy(DEFAULT_POLICY)
@@ -39,5 +44,8 @@ export function DEFAULT_CONFIG(): ByoaConfig {
       recall: { limit: 4, budgetTokens: 800 },
     },
     store: { path: "" },
+    plugins: { dir: defaultPluginsDir(), enabled: [] },
+    mcp: { servers: [] },
+    subagents: { enabled: true, maxDepth: 2, maxSteps: 12 },
   }
 }
