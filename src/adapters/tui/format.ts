@@ -1,4 +1,14 @@
-import { breakpoints, glyph } from "./theme.ts"
+import { breakpoints, glyph, radar } from "./theme.ts"
+
+/**
+ * The radar frame for a tick counter. Negative and nonsense values still produce a glyph: this runs
+ * inside a render loop, and an empty string would make the line jitter by a cell.
+ */
+export function radarFrame(tick: number): string {
+  if (!Number.isFinite(tick)) return radar[0] as string
+  const index = ((Math.trunc(tick) % radar.length) + radar.length) % radar.length
+  return radar[index] as string
+}
 
 /** 1234 -> "1.2k", 1234567 -> "1.2M". Small numbers stay exact. */
 export function compactCount(value: number): string {

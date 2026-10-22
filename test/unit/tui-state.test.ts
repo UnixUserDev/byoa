@@ -45,6 +45,10 @@ test("tool calls update in place and failures are counted", () => {
   const tools = state.blocks.filter((b) => b.kind === "tool")
   assert.equal(tools.length, 1)
   assert.equal(tools[0]?.kind === "tool" ? tools[0].ok : null, false)
+  assert.ok(
+    typeof (tools[0]?.kind === "tool" ? tools[0].startedAt : undefined) === "number",
+    "a tool records when it started, so a pending one can show its age",
+  )
   assert.equal(state.turn.tools, 1)
   assert.equal(state.turn.toolFails, 1)
 })
@@ -109,4 +113,16 @@ test("the transcript is capped so a long session cannot grow without bound", () 
 test("sandbox degradation is reflected in the badge", () => {
   const state = feed(initialState(), [{ t: "sandbox.info", applied: false, degraded: true, reason: "no bwrap", policy: {} as never }])
   assert.equal(state.sandbox.badge, "sandbox degraded")
+})
+
+test("a call still in flight keeps ok null and its start time", () => {
+  const state = feed(initialState(), [
+    session,
+    { t: "turn.start", turn: 1 },
+    { t: "tool.call", id: "c9", name: "task", args: { task: "read the repo" }, mutating: false },
+  ], 5_000)
+  const tool = state.blocks.find((block) => block.kind === "tool")
+  assert.equal(tool?.kind === "tool" ? tool.ok : "missing", null)
+  assert.equal(tool?.kind === "tool" ? tool.name : "", "task")
+  assert.equal(typeof (tool?.kind === "tool" ? tool.startedAt : undefined), "number")
 })

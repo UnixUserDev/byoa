@@ -28,6 +28,15 @@ export const glyph = {
   pending: "…",
 } as const
 
+/**
+ * One braille dot orbiting clockwise: top-left, top-right, bottom-right, bottom-left.
+ *
+ * Four frames rather than the usual ten - the brief for this UI is calm, and a ten-frame spinner is
+ * a flickering thing to have in your peripheral vision for two minutes. A single cell, so the line
+ * does not jump width as it animates.
+ */
+export const radar = ["⠁", "⠈", "⠐", "⠂"] as const
+
 /** Layout switches, in columns. */
 export const breakpoints = {
   compact: 90,

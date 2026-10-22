@@ -1,6 +1,6 @@
 import type { Block, TuiState } from "./state.ts"
 import { glyph, theme } from "./theme.ts"
-import { splitStatus, truncate } from "./format.ts"
+import { formatDuration, radarFrame, splitStatus, truncate } from "./format.ts"
 
 /**
  * The OpenTUI module is injected, not imported. That keeps this file out of the smoke test's
@@ -29,6 +29,8 @@ export interface View {
   renderMode(state: TuiState): void
   setReasoningVisible(visible: boolean): void
   setToolsExpanded(expanded: boolean): void
+  /** Advance the radar on every still-running tool. Called from the animation tick, not per event. */
+  setSpinnerFrame(frame: number): void
   scrollBy(delta: number): void
   scrollBottom(): void
   focusInput(): void
@@ -136,6 +138,8 @@ export function createView(kit: Kit, ctx: any, width: number, height: number): V
   /** block id -> accumulated text. */
   const buffers = new Map<number, string>()
   let toolsExpanded = false
+  /** Global animation phase: every pending tool shares it, so the transcript pulses as one thing. */
+  let spinnerFrame = 0
 
   const textOf = (block: Block): string => {
     switch (block.kind) {
@@ -150,8 +154,17 @@ export function createView(kit: Kit, ctx: any, width: number, height: number): V
       case "notice":
         return block.text
       case "tool": {
-        const mark = block.ok === null ? glyph.pending : block.ok ? glyph.ok : glyph.fail
-        const duration = block.durationMs === undefined ? "" : ` · ${Math.round(block.durationMs)}ms`
+        // A still-running tool is the one place this UI can look hung: say how long it has been
+        // going, and keep a dot moving so "slow" never reads as "dead".
+        const pending = block.ok === null
+        const mark = pending ? radarFrame(spinnerFrame) : block.ok ? glyph.ok : glyph.fail
+        const duration = pending
+          ? block.startedAt === undefined
+            ? ""
+            : ` · ${formatDuration(Math.max(0, Date.now() - block.startedAt))}`
+          : block.durationMs === undefined
+            ? ""
+            : ` · ${Math.round(block.durationMs)}ms`
         const summary = block.summary.length > 0 ? ` ${block.summary}` : ""
         const line = `${glyph.tool} ${block.name}${summary} ${mark}${duration}`
         if (!toolsExpanded || block.content === undefined || block.content.trim().length === 0) return line
@@ -310,6 +323,24 @@ export function createView(kit: Kit, ctx: any, width: number, height: number): V
         const node = rendered.get(id)
         if (node) node.content = textOf(block)
       }
+    },
+    setSpinnerFrame: (frame: number) => {
+      spinnerFrame = frame
+      let changed = false
+      for (const [id, block] of blocksById) {
+        // Only what is actually animating gets rewritten; a finished tool keeps its rendered text.
+        if (block.kind !== "tool" || block.ok !== null) continue
+        const node = rendered.get(id)
+        if (!node) continue
+        const text = textOf(block)
+        if (node.content !== text) {
+          node.content = text
+          changed = true
+        }
+      }
+      // Content writes do not schedule a repaint on their own, and the app's event loop is otherwise
+      // idle while a tool runs - which is exactly when this has to draw.
+      if (changed) ctx.requestRender?.()
     },
     scrollBy: (delta: number) => {
       if (typeof transcript.scrollBy === "function") transcript.scrollBy({ x: 0, y: delta })

@@ -31,6 +31,8 @@ export interface ToolBlock {
   name: string
   summary: string
   ok: boolean | null
+  /** Wall-clock start, so a still-running tool can show its age instead of an indefinite "…". */
+  startedAt?: number
   durationMs?: number
   content?: string
 }
@@ -253,6 +255,7 @@ function reduceInner(state: TuiState, event: AgentEvent, now: number): ReduceRes
         name: event.name,
         summary: "",
         ok: null,
+        startedAt: now,
       })
       const withIndex: TuiState = {
         ...next,

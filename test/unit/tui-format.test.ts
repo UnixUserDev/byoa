@@ -4,6 +4,7 @@ import {
   compactCount,
   formatDuration,
   formatTps,
+  radarFrame,
   splitStatus,
   statusLine,
   summarizeApproval,
@@ -111,4 +112,13 @@ test("splitStatus keeps both ends inside the width", () => {
     width: 60,
   })
   assert.ok(split.left.length + split.right.length + 3 <= 60)
+})
+
+test("the radar rotates through one cell and never disappears", () => {
+  const frames = [0, 1, 2, 3, 4, 5].map(radarFrame)
+  assert.deepEqual(frames, ["⠁", "⠈", "⠐", "⠂", "⠁", "⠈"])
+  // A render loop must not be able to produce an empty glyph, or the line shifts a column.
+  for (const tick of [-3, -1, 1.7, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.equal(radarFrame(tick).length, 1)
+  }
 })

@@ -267,6 +267,20 @@ export function createApp(options: AppOptions): App {
   }, 1000)
   if (typeof ticker.unref === "function") ticker.unref()
 
+  /**
+   * Radar tick. ~9 fps, and it costs nothing when idle: a turn with no tool in flight returns
+   * immediately, so a transcript sitting still does not repaint itself forever.
+   */
+  let spinnerFrame = 0
+  const spinner = setInterval(() => {
+    if (state.mode !== "running") return
+    const pending = state.blocks.some((block) => block.kind === "tool" && block.ok === null)
+    if (!pending) return
+    spinnerFrame += 1
+    view.setSpinnerFrame(spinnerFrame)
+  }, 110)
+  if (typeof spinner.unref === "function") spinner.unref()
+
   view.renderHeader(state)
   view.renderStats(state)
   view.renderMode(state)
@@ -291,6 +305,7 @@ export function createApp(options: AppOptions): App {
       flushText()
       if (flushTimer !== null) clearTimeout(flushTimer)
       clearInterval(ticker)
+      clearInterval(spinner)
       if (options.renderer.keyInput?.off) options.renderer.keyInput.off("keypress", onKey)
       if (options.renderer.off) options.renderer.off("resize", onResize)
     },

@@ -120,3 +120,42 @@ maybe("the layout survives a narrow resize", async () => {
     await setup.dispose()
   }
 })
+
+maybe("a tool still in flight shows a moving radar and its age", async () => {
+  const { createTestRenderer } = testing
+  const { createApp } = await import("../../src/adapters/tui/app.ts")
+  const setup = await createTestRenderer({ width: 100, height: 28 })
+  try {
+    const agent = {
+      events: async function* (): AsyncGenerator<never> {},
+      send: () => {},
+      session: async () => ({ id: "ses_1", title: "demo" }),
+      idle: async () => {},
+      dispose: async () => {},
+    }
+    const app = createApp({ agent: agent as never, kit, renderer: setup.renderer, width: 100, height: 28 })
+    setup.renderer.root.add(app.root)
+    app.handleEvent({ t: "turn.start", turn: 1 })
+    app.handleEvent({ t: "tool.call", id: "c9", name: "task", args: { task: "read the repo" }, mutating: false })
+
+    const first = await setup.waitForFrame((text: string) => text.includes("task"))
+    assert.match(first, /[⠁⠈⠐⠂]/, "a pending tool carries a radar frame")
+    assert.match(first, /\d+s|\d\.\ds/, "and says how long it has been running")
+
+    // Animation is wall-clock driven, so the frame has to actually advance in real time. Two ticks
+    // at 110 ms; waiting on the renderer alone returns immediately because nothing is scheduled.
+    await new Promise((resolve) => setTimeout(resolve, 260))
+    await setup.flush()
+    const animated = setup.captureCharFrame()
+    assert.match(animated, /task/)
+    assert.match(animated, /[⠈⠐⠂]/, "the glyph moved without any new agent event")
+
+    app.handleEvent({ t: "tool.result", id: "c9", name: "task", ok: true, content: "done" })
+    const finished = await setup.waitForFrame((text: string) => text.includes("✓"))
+    assert.match(finished, /task/)
+    assert.doesNotMatch(finished, /[⠁⠈⠐⠂]/, "a finished tool keeps still")
+    app.dispose()
+  } finally {
+    await setup.dispose()
+  }
+})
